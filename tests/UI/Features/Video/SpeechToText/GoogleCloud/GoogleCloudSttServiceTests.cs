@@ -331,4 +331,47 @@ public class GoogleCloudSttServiceTests
         Assert.Equal("uc dort", response.Segments[1].Text);
         Assert.Equal(20.0, response.Segments[1].Start, 3);
     }
+
+    [Fact]
+    public void ResolveProjectId_PrefersTheExplicitSetting()
+    {
+        var settings = new GoogleCloudSttSettings { ProjectId = " my-project ", KeyFile = "/does/not/exist.json" };
+        Assert.Equal("my-project", GoogleCloudSttService.ResolveProjectId(settings));
+    }
+
+    [Fact]
+    public void ResolveProjectId_ReadsTheKeyFileWhenNoExplicitSettingIsGiven()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".json");
+        File.WriteAllText(path, """{"type":"service_account","project_id":"from-key-file"}""");
+        try
+        {
+            var settings = new GoogleCloudSttSettings { KeyFile = path };
+            Assert.Equal("from-key-file", GoogleCloudSttService.ResolveProjectId(settings));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// Creating a service account key is commonly blocked by the
+    /// constraints/iam.disableServiceAccountKeyCreation org policy, so an empty key file
+    /// has to be a valid configuration rather than an error.
+    /// </summary>
+    [Fact]
+    public void ResolveProjectId_FallsBackToTheEnvironmentWhenThereIsNoKeyFile()
+    {
+        var previous = Environment.GetEnvironmentVariable("GOOGLE_CLOUD_PROJECT");
+        try
+        {
+            Environment.SetEnvironmentVariable("GOOGLE_CLOUD_PROJECT", "from-environment");
+            Assert.Equal("from-environment", GoogleCloudSttService.ResolveProjectId(new GoogleCloudSttSettings()));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("GOOGLE_CLOUD_PROJECT", previous);
+        }
+    }
 }
