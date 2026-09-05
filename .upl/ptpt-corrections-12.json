@@ -1,0 +1,20 @@
+{
+  "video.chapters.shiftAllTimesDescription": "Desloca todos os capítulos para a frente ou para trás pelo mesmo valor.",
+  "video.chapters.toggleChapterAtVideoPosition": "Alternar capítulo na posição atual do vídeo",
+  "video.chapters.unableToWriteChapters": "Não foi possível guardar os capítulos no ficheiro de vídeo.",
+  "video.chapters.writeToVideo": "Guardar no vídeo...",
+  "video.chapters.writeToVideoTitle": "Guardar capítulos no vídeo",
+  "video.chapters.writeToVideoUnsupportedContainer": "Os capítulos só podem ser guardados em ficheiros MP4 e Matroska.",
+  "video.chapters.writtenToX": "Capítulos guardados em {0}",
+  "video.indexTts25LicenseAcceptCheckBox": "Li e aceito o Contrato de Licença de Utilização do Modelo da bilibili",
+  "video.indexTts25LicenseDeclined": "O IndexTTS 2.5 não pode ser utilizado enquanto a licença do modelo não for aceite.",
+  "video.indexTts25LicenseHeader": "O modelo IndexTTS 2.5 tem a sua própria licença",
+  "video.indexTts25LicenseReadFullText": "Ler a licença completa",
+  "video.indexTts25LicenseTitle": "IndexTTS 2.5 - licença do modelo",
+  "video.subtitlesOnVideoPlayerOff": "Legendas no leitor de vídeo: desativadas",
+  "video.subtitlesOnVideoPlayerOn": "Legendas no leitor de vídeo: ativadas",
+  "video.textToSpeech.autoCastCloningX": "A clonar {0}...",
+  "video.textToSpeech.autoCastDoneXVoices": "{0} vozes clonadas - abra Texto para voz para gerar a dobragem",
+  "video.textToSpeech.autoCastMenuItem": "Encontrar vozes no vídeo e cloná-las...",
+  "video.textToSpeech.autoCastNeedsVideo": "É necessário ter um vídeo aberto para procurar e ouvir as vozes."
+}
