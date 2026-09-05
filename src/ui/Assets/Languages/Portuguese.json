@@ -1078,7 +1078,7 @@
     "videoAndWaveformPreviewTextX": "Prévia do vídeo/forma de onda: {0}",
     "xLinesCopiedFromOriginal": "{0} linhas copiadas da legenda original",
     "xLinesCopiedToOriginal": "{0} linhas copiadas para a legenda original",
-    "xLinesMerged": "Linhas combinadas",
+    "xLinesMerged": "{0} linhas combinadas",
     "xLinesSelectedOfY": "{0} linhas selecionadas de {1}",
     "xLinesSwitched": "{0} linhas trocadas",
     "xShotChangedLoaded": "{0} mudanças de cena carregadas",
