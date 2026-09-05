@@ -1,0 +1,131 @@
+name: UPL pt-PT sync helper
+
+on:
+  pull_request:
+    branches:
+      - upl/upstream-main-20260905
+
+permissions:
+  contents: write
+
+jobs:
+  sync-ptpt:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Apply reviewed pt-PT mapping
+        id: sync
+        shell: bash
+        run: |
+          if [ ! -f .upl/pt-pt-sync.json ]; then
+            echo "No .upl/pt-pt-sync.json on the PR head; nothing to apply."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          python - <<'PY'
+          import codecs
+          import json
+          from pathlib import Path
+
+          root = Path('.')
+          lang_dir = root / 'src/ui/Assets/Languages'
+          en_path = lang_dir / 'English.json'
+          pt_path = lang_dir / 'Portuguese.json'
+          map_path = root / '.upl/pt-pt-sync.json'
+
+          def load(path):
+              return json.loads(path.read_text(encoding='utf-8-sig'))
+
+          en = load(en_path)
+          pt = load(pt_path)
+          spec = load(map_path)
+          reviewed = spec.get('set', {})
+          remove = set(spec.get('remove', []))
+
+          def leaf_paths(obj, prefix=''):
+              out = {}
+              if not isinstance(obj, dict):
+                  return out
+              for key, value in obj.items():
+                  path = f'{prefix}.{key}' if prefix else key
+                  if isinstance(value, str):
+                      out[path] = value
+                  elif isinstance(value, dict):
+                      out.update(leaf_paths(value, path))
+              return out
+
+          en_leaves = leaf_paths(en)
+          pt_leaves = leaf_paths(pt)
+          metadata = {'title', 'version', 'translatedBy', 'cultureName'}
+          missing = sorted(set(en_leaves) - set(pt_leaves) - metadata)
+          extra = sorted(set(pt_leaves) - set(en_leaves) - metadata)
+
+          unresolved = [p for p in missing if p not in reviewed]
+          unknown_set = sorted(set(reviewed) - set(missing))
+          if unresolved:
+              raise SystemExit('Mapping does not cover every missing key: ' + ', '.join(unresolved))
+          if unknown_set:
+              raise SystemExit('Mapping contains paths that are not currently missing: ' + ', '.join(unknown_set))
+          if set(extra) != remove:
+              raise SystemExit('remove list does not exactly match current extra keys. Expected: ' + ', '.join(extra))
+
+          def get_path(obj, parts):
+              cur = obj
+              for part in parts:
+                  if not isinstance(cur, dict) or part not in cur:
+                      return None, False
+                  cur = cur[part]
+              return cur, True
+
+          # Rebuild in English order, preserving every existing Portuguese value.
+          def rebuild(en_obj, pt_obj, prefix=''):
+              result = {}
+              if not isinstance(en_obj, dict):
+                  return pt_obj
+              pt_obj = pt_obj if isinstance(pt_obj, dict) else {}
+              for key, en_value in en_obj.items():
+                  path = f'{prefix}.{key}' if prefix else key
+                  if isinstance(en_value, dict):
+                      result[key] = rebuild(en_value, pt_obj.get(key, {}), path)
+                  elif isinstance(en_value, str):
+                      if path == 'version':
+                          result[key] = en_value
+                      elif key in pt_obj and isinstance(pt_obj[key], str):
+                          result[key] = pt_obj[key]
+                      elif path in reviewed:
+                          result[key] = reviewed[path]
+                      else:
+                          result[key] = en_value
+                  else:
+                      result[key] = pt_obj.get(key, en_value)
+              return result
+
+          synced = rebuild(en, pt)
+          text = json.dumps(synced, ensure_ascii=False, indent=2) + '\n'
+          pt_path.write_bytes(codecs.BOM_UTF8 + text.encode('utf-8'))
+          PY
+
+          rm .upl/pt-pt-sync.json
+          rmdir .upl 2>/dev/null || true
+
+          if git diff --quiet -- src/ui/Assets/Languages/Portuguese.json .upl; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit synchronized translation
+        if: steps.sync.outputs.changed == 'true'
+        shell: bash
+        run: |
+          git config user.name "BlackSpirits"
+          git config user.email "11444904+Blackspirits@users.noreply.github.com"
+          git add src/ui/Assets/Languages/Portuguese.json .upl || true
+          git commit -m "Update Portuguese translation for v5.2.0"
+          git push origin HEAD:${{ github.head_ref }}
