@@ -1,0 +1,21 @@
+{
+  "video.textToSpeech.importPiperVoiceTitle": "Abrir modelo de voz Piper (.onnx)",
+  "video.textToSpeech.piperVoiceConfigMissingMessage": "Uma voz Piper necessita do respetivo ficheiro de configuração junto ao ficheiro do modelo: {0}",
+  "video.textToSpeech.piperVoiceConfigMissingTitle": "Ficheiro de configuração em falta",
+  "video.textToSpeech.resetTiming": "Repor tempos",
+  "video.textToSpeech.skipNoiseLinesFoundX": "{0} linhas contêm apenas sons ou música - as linhas assinaladas ficam em silêncio",
+  "video.textToSpeech.skipNoiseLinesPromptMessage": "Algumas linhas contêm apenas sons ou música, como ♪ ou [porta bate].\n\nOs motores de voz tentam ler essas linhas em voz alta e muitas vezes inventam palavras.\n\nRever estas linhas e deixá-las em silêncio?",
+  "video.textToSpeech.skipNoiseLinesPromptTitle": "Ignorar linhas de som e música?",
+  "video.textToSpeech.voiceCloneConsentDeclined": "A clonagem de voz não fica disponível enquanto estes termos não forem aceites.",
+  "video.textToSpeech.voiceCloneConsentHeader": "Está prestes a clonar uma voz",
+  "video.textToSpeech.voiceCloneConsentIntro": "A clonagem copia a voz de uma pessoa real. Na maioria dos locais existem regras aplicáveis e, na União Europeia, obrigações legais que cabem ao utilizador, não ao Subtitle Edit. Leia esta informação antes de continuar.",
+  "video.textToSpeech.voiceCloneConsentPointDisclose": "Se publicar áudio que imite uma pessoa real, deve indicar que foi gerado por IA. Na UE, esta transparência é exigida pelo Regulamento da IA (Regulamento (UE) 2024/1689, artigo 50), aplicável a partir de 2 de agosto de 2026.",
+  "video.textToSpeech.voiceCloneConsentPointLocal": "A gravação de referência permanece neste computador. A clonagem é executada localmente e o áudio não é carregado para o Subtitle Edit nem para qualquer outro serviço.",
+  "video.textToSpeech.voiceCloneConsentPointNoImpersonation": "Não utilize uma voz clonada para se fazer passar por outra pessoa, para fazer parecer que alguém disse algo que nunca disse, nem para fraude, assédio ou engano.",
+  "video.textToSpeech.voiceCloneConsentReadMore": "Acerca das regras de transparência do Regulamento da IA da UE",
+  "video.textToSpeech.voiceXCouldNotBeImported": "Não foi possível importar a voz '{0}' - consulte o registo para obter detalhes",
+  "video.toggleSubtitlesOnVideoPlayer": "Ativar/desativar legendas no leitor de vídeo",
+  "video.videoOcr.dictionaryHint": "Dicionário de verificação ortográfica utilizado pelo motor de correção de OCR e pela coloração das palavras: as palavras conhecidas aparecem a verde e as desconhecidas a vermelho.",
+  "video.videoOcr.minDurationHint": "As linhas apresentadas no ecrã durante menos tempo do que este valor são descartadas como falsos resultados de OCR.",
+  "video.videoOcr.refiningTimingXY": "A aperfeiçoar tempos... {0}/{1}"
+}
