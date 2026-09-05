@@ -1,0 +1,22 @@
+{
+  "tools.removeUnicodeCharacters.noCharactersFound": "Não foram encontrados carateres Unicode",
+  "tools.splitBreakLongLines.rebalanceOnlyLinesTooLongHint": "Manter as quebras de linha existentes quando todas as linhas já respeitam o comprimento máximo de uma linha — uma legenda deliberadamente desequilibrada pode estar editorialmente correta.",
+  "translate.advancedSettingsSubtitle": "Opções de lote, contexto e amostragem para o motor avançado llama.cpp",
+  "translate.extraServerParametersHint": "Argumentos adicionais da linha de comandos do llama-server, por exemplo \"-ngl 30 --no-mmap\" - aplicados quando o servidor local é iniciado",
+  "translate.glossaryHint": "Um por linha: termo de origem = tradução",
+  "translate.minusOneMeansDefault": "-1 = predefinição do modelo/servidor",
+  "translate.repeatPenalty": "Penalização de repetição",
+  "translate.resetPromptToDefault": "Repor prompt predefinido",
+  "translate.serverRunningAtX": "Servidor em execução em {0}",
+  "translate.synopsisHint": "Descrição opcional do conteúdo (género, cenário, tom) - incluída em todos os pedidos",
+  "translate.topK": "Top-k",
+  "translate.topP": "Top-p",
+  "translate.useOnlyExtraServerParametersHint": "Iniciar o llama-server com os parâmetros acima em vez da afinação do Subtitle Edit - apenas o modelo, o anfitrião e a porta continuam a ser definidos",
+  "video.assaStyleWillBeUsed": "Será utilizado o estilo ASSA atual\r\n\r\nAltere o formato da legenda se\r\npretender definir os estilos aqui",
+  "video.audioToText.addLanguageCodeToFileNameHint": "Atribuir às legendas geradas nomes como \"video.en.srt\" em vez de \"video.srt\"",
+  "video.audioToText.qualityReportAll": "Todos",
+  "video.audioToText.qualityReportDoNotShowAgain": "Não voltar a mostrar este relatório",
+  "video.audioToText.qualityReportNonSpeechHint": "Apenas uma descrição de som ou música, como \"[Música]\"",
+  "video.audioToText.qualityReportOverlapHint": "Termina depois de a linha seguinte começar",
+  "video.audioToText.qualityReportRepeatedHint": "Mesmo texto da linha anterior (ciclo do motor)"
+}
