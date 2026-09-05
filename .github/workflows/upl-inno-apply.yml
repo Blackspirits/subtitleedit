@@ -1,0 +1,51 @@
+name: UPL Inno 7.1 apply
+
+on:
+  pull_request:
+    branches:
+      - upl/inno-7.1.0-base-a1e4255
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'upl/inno-7.1.0-a1e4255'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.head_ref }}
+
+      - name: Apply verified Inno Setup 7.1.0 pin
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/build-ui.yml')
+          text = path.read_text(encoding='utf-8')
+
+          replacements = {
+              '      - name: Install Inno Setup 6.7.3\n': '      - name: Install Inno Setup 7.1.0 x64\n',
+              '        # Pin an exact version: the .iss script requires 6.7.3+, but Chocolatey still ships 6.7.1.\n': '        # Pin the exact x64 release and verify its hash before executing it.\n',
+              '          $url = "https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe"\n': '          $url = "https://github.com/jrsoftware/issrc/releases/download/is-7_1_0/innosetup-7.1.0-x64.exe"\n          $expectedSha256 = "0362a383ed217d4c4239b5933866dd96d3eb2102737da92f80f6057a4b40df2f"\n',
+              '          Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\\innosetup.exe"\n': '          Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\\innosetup.exe"\n          $actualSha256 = (Get-FileHash "$env:RUNNER_TEMP\\innosetup.exe" -Algorithm SHA256).Hash.ToLowerInvariant()\n          if ($actualSha256 -ne $expectedSha256) {\n            throw "Inno Setup SHA-256 mismatch: expected $expectedSha256, got $actualSha256"\n          }\n',
+              '          & "C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe" "installer\\WindowsInno\\Subtitle_Edit_Installer.iss"\n': '          & "C:\\Program Files\\Inno Setup 7\\ISCC.exe" "installer\\WindowsInno\\Subtitle_Edit_Installer.iss"\n',
+          }
+
+          for old, new in replacements.items():
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'Expected exactly one occurrence, found {count}: {old!r}')
+              text = text.replace(old, new)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Commit workflow update
+        run: |
+          git config user.name 'BlackSpirits'
+          git config user.email 'blackspirits@gmail.com'
+          git add .github/workflows/build-ui.yml
+          git commit -m 'Use verified Inno Setup 7.1.0 x64 in release build'
+          git push origin HEAD:${{ github.head_ref }}
