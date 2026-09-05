@@ -1,0 +1,59 @@
+name: UPL Inno Setup 7 smoke test
+
+on:
+  pull_request:
+    branches:
+      - upl/upstream-main-20260905
+  workflow_dispatch:
+
+jobs:
+  inno-7-smoke:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore and publish Windows x64 app
+        shell: pwsh
+        run: |
+          dotnet restore SubtitleEdit.sln
+          dotnet publish src/ui/UI.csproj -c Release -r win-x64 --self-contained false `
+            -p:PublishSingleFile=true `
+            -p:DebugSymbols=false `
+            -p:DebugType=none `
+            -o ./src/ui/bin/Release/net10.0/publish
+          New-Item -ItemType File -Force ./src/ui/bin/Release/net10.0/publish/libmpv-2.dll | Out-Null
+
+      - name: Install verified Inno Setup 7.1.0 x64
+        shell: pwsh
+        run: |
+          $url = "https://github.com/jrsoftware/issrc/releases/download/is-7_1_0/innosetup-7.1.0-x64.exe"
+          $expectedSha256 = "0362a383ed217d4c4239b5933866dd96d3eb2102737da92f80f6057a4b40df2f"
+          $installer = "$env:RUNNER_TEMP\innosetup.exe"
+          Invoke-WebRequest -Uri $url -OutFile $installer
+          $actualSha256 = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualSha256 -ne $expectedSha256) {
+            throw "Inno Setup SHA-256 mismatch: expected $expectedSha256, got $actualSha256"
+          }
+          Start-Process -FilePath $installer -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/SP-" -Wait
+
+      - name: Compile Subtitle Edit installer script with Inno Setup 7.1.0
+        shell: pwsh
+        run: |
+          $iscc = "$env:ProgramFiles\Inno Setup 7\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            throw "ISCC.exe not found at $iscc"
+          }
+          & $iscc "installer\WindowsInno\Subtitle_Edit_Installer.iss"
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+          $setup = Get-ChildItem "installer\WindowsInno\SubtitleEdit-*-Setup.exe" | Select-Object -First 1
+          if (-not $setup) {
+            throw "Inno Setup completed without producing a SubtitleEdit setup executable"
+          }
+          Write-Host "Compiled with Inno Setup 7.1.0: $($setup.Name)"
