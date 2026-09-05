@@ -5,12 +5,39 @@ on:
     branches:
       - upl/ptpt-5.2.0-base-a1e4255
 
+permissions:
+  contents: write
+
 jobs:
   qa:
     if: github.head_ref == 'upl/ptpt-5.2.0'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.head_ref }}
+
+      - name: Fix confirmed placeholder regression
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path('src/ui/Assets/Languages/Portuguese.json')
+          data = json.loads(path.read_text(encoding='utf-8-sig'))
+          old = data['main']['xLinesMerged']
+          if old not in ('Linhas combinadas', '{0} linhas combinadas'):
+              raise SystemExit(f'Unexpected main.xLinesMerged value: {old!r}')
+          data['main']['xLinesMerged'] = '{0} linhas combinadas'
+          path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          PY
+          if ! git diff --quiet -- src/ui/Assets/Languages/Portuguese.json; then
+            git config user.name 'BlackSpirits'
+            git config user.email 'blackspirits@gmail.com'
+            git add src/ui/Assets/Languages/Portuguese.json
+            git commit -m 'Fix Portuguese merged-lines placeholder'
+            git push origin HEAD:${{ github.head_ref }}
+          fi
+
       - name: Validate pt-PT structure, placeholders, and terminology
         run: |
           python - <<'PY'
@@ -34,41 +61,23 @@ jobs:
           en_l, pt_l = leaves(en), leaves(pt)
           missing = sorted(set(en_l)-set(pt_l)-meta)
           extra = sorted(set(pt_l)-set(en_l)-meta)
-          print(f'MISSING={len(missing)} EXTRA={len(extra)}')
-          if missing or extra:
-              print('MISSING', *missing, sep='\n  ')
-              print('EXTRA', *extra, sep='\n  ')
-              raise SystemExit('Structural mismatch')
 
           ph = re.compile(r'\{(\d+)(?::[^}]*)?\}')
           ph_errors=[]
           for p,e in en_l.items():
-              if p in meta: continue
+              if p in meta or p not in pt_l: continue
               a=sorted(ph.findall(e)); b=sorted(ph.findall(pt_l[p]))
               if a!=b: ph_errors.append((p,a,b,e,pt_l[p]))
-          print(f'PLACEHOLDER_ERRORS={len(ph_errors)}')
-          for x in ph_errors:
-              print('PH', *x, sep='\t')
-          if ph_errors: raise SystemExit('Placeholder mismatch')
 
           invis = re.compile('[\u200b\u200c\u200d\ufeff]')
-          invisible=[]
-          for p,v in pt_l.items():
-              if p not in meta and invis.search(v): invisible.append((p,repr(v)))
-          print(f'INVISIBLE_ERRORS={len(invisible)}')
-          for x in invisible: print('INVISIBLE', *x, sep='\t')
-          if invisible: raise SystemExit('Invisible Unicode found')
+          invisible=[(p,repr(v)) for p,v in pt_l.items() if p not in meta and invis.search(v)]
 
           hard = re.compile(r'\b(arquivo|arquivos|mouse|tela|telas|salvar|salvando|baixar|usuário|usuários|usuária|usuárias|aplicativo|aplicativos|caractere|caracteres|dublagem|gerenciador|gerenciadores|você|vocês|aceitos|aceitas|européia|planilha|planilhas)\b', re.I)
-          lexical=[]
-          for p,v in pt_l.items():
-              if p not in meta and hard.search(v): lexical.append((p,v))
-          print(f'HARD_PTBR_MARKERS={len(lexical)}')
-          for x in lexical: print('PTBR', *x, sep='\t')
+          lexical=[(p,v) for p,v in pt_l.items() if p not in meta and hard.search(v)]
 
           semantic=[]
           for p,e in en_l.items():
-              if p in meta: continue
+              if p in meta or p not in pt_l: continue
               v=pt_l[p]
               if re.search(r'\bfonts?\b', e, re.I) and re.search(r'\bfontes?\b', v, re.I):
                   semantic.append((p,'font->fonte',e,v))
@@ -76,9 +85,19 @@ jobs:
                   semantic.append((p,'frame->quadro',e,v))
               if re.search(r'\bplayer\b', v, re.I):
                   semantic.append((p,'player',e,v))
+
+          print(f'MISSING={len(missing)} EXTRA={len(extra)}')
+          print(f'PLACEHOLDER_ERRORS={len(ph_errors)}')
+          print(f'INVISIBLE_ERRORS={len(invisible)}')
+          print(f'HARD_PTBR_MARKERS={len(lexical)}')
           print(f'TERMINOLOGY_MARKERS={len(semantic)}')
+          for p in missing: print('MISSING', p, sep='\t')
+          for p in extra: print('EXTRA', p, sep='\t')
+          for x in ph_errors: print('PH', *x, sep='\t')
+          for x in invisible: print('INVISIBLE', *x, sep='\t')
+          for x in lexical: print('PTBR', *x, sep='\t')
           for x in semantic: print('TERM', *x, sep='\t')
 
-          if lexical or semantic:
-              raise SystemExit('pt-PT terminology review required')
+          if missing or extra or ph_errors or invisible or lexical or semantic:
+              raise SystemExit('pt-PT final QA findings remain')
           PY
