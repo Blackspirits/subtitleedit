@@ -1,0 +1,84 @@
+name: UPL pt-PT final QA
+
+on:
+  pull_request:
+    branches:
+      - upl/ptpt-5.2.0-base-a1e4255
+
+jobs:
+  qa:
+    if: github.head_ref == 'upl/ptpt-5.2.0'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Validate pt-PT structure, placeholders, and terminology
+        run: |
+          python - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          folder = Path('src/ui/Assets/Languages')
+          en = json.loads((folder/'English.json').read_text(encoding='utf-8-sig'))
+          pt = json.loads((folder/'Portuguese.json').read_text(encoding='utf-8-sig'))
+          meta = {'title','version','translatedBy','cultureName'}
+
+          def leaves(obj, prefix=''):
+              out = {}
+              for k, v in obj.items():
+                  p = f'{prefix}.{k}' if prefix else k
+                  if isinstance(v, str): out[p] = v
+                  elif isinstance(v, dict): out.update(leaves(v, p))
+              return out
+
+          en_l, pt_l = leaves(en), leaves(pt)
+          missing = sorted(set(en_l)-set(pt_l)-meta)
+          extra = sorted(set(pt_l)-set(en_l)-meta)
+          print(f'MISSING={len(missing)} EXTRA={len(extra)}')
+          if missing or extra:
+              print('MISSING', *missing, sep='\n  ')
+              print('EXTRA', *extra, sep='\n  ')
+              raise SystemExit('Structural mismatch')
+
+          ph = re.compile(r'\{(\d+)(?::[^}]*)?\}')
+          ph_errors=[]
+          for p,e in en_l.items():
+              if p in meta: continue
+              a=sorted(ph.findall(e)); b=sorted(ph.findall(pt_l[p]))
+              if a!=b: ph_errors.append((p,a,b,e,pt_l[p]))
+          print(f'PLACEHOLDER_ERRORS={len(ph_errors)}')
+          for x in ph_errors:
+              print('PH', *x, sep='\t')
+          if ph_errors: raise SystemExit('Placeholder mismatch')
+
+          invis = re.compile('[\u200b\u200c\u200d\ufeff]')
+          invisible=[]
+          for p,v in pt_l.items():
+              if p not in meta and invis.search(v): invisible.append((p,repr(v)))
+          print(f'INVISIBLE_ERRORS={len(invisible)}')
+          for x in invisible: print('INVISIBLE', *x, sep='\t')
+          if invisible: raise SystemExit('Invisible Unicode found')
+
+          hard = re.compile(r'\b(arquivo|arquivos|mouse|tela|telas|salvar|salvando|baixar|usuário|usuários|usuária|usuárias|aplicativo|aplicativos|caractere|caracteres|dublagem|gerenciador|gerenciadores|você|vocês|aceitos|aceitas|européia|planilha|planilhas)\b', re.I)
+          lexical=[]
+          for p,v in pt_l.items():
+              if p not in meta and hard.search(v): lexical.append((p,v))
+          print(f'HARD_PTBR_MARKERS={len(lexical)}')
+          for x in lexical: print('PTBR', *x, sep='\t')
+
+          semantic=[]
+          for p,e in en_l.items():
+              if p in meta: continue
+              v=pt_l[p]
+              if re.search(r'\bfonts?\b', e, re.I) and re.search(r'\bfontes?\b', v, re.I):
+                  semantic.append((p,'font->fonte',e,v))
+              if re.search(r'\bframes?\b', e, re.I) and re.search(r'\bquadros?\b', v, re.I):
+                  semantic.append((p,'frame->quadro',e,v))
+              if re.search(r'\bplayer\b', v, re.I):
+                  semantic.append((p,'player',e,v))
+          print(f'TERMINOLOGY_MARKERS={len(semantic)}')
+          for x in semantic: print('TERM', *x, sep='\t')
+
+          if lexical or semantic:
+              raise SystemExit('pt-PT terminology review required')
+          PY
