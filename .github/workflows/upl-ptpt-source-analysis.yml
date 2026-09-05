@@ -1,0 +1,64 @@
+name: UPL pt-PT source analysis
+
+on:
+  pull_request:
+    branches:
+      - upl/upstream-main-20260905
+
+jobs:
+  source-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Measure reusable translation coverage
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          folder = Path('src/ui/Assets/Languages')
+          en = json.loads((folder / 'English.json').read_text(encoding='utf-8-sig'))
+          pt = json.loads((folder / 'Portuguese.json').read_text(encoding='utf-8-sig'))
+          br = json.loads((folder / 'Portuguese (Brazil).json').read_text(encoding='utf-8-sig'))
+
+          def leaves(obj, prefix=''):
+              out = {}
+              if not isinstance(obj, dict):
+                  return out
+              for key, value in obj.items():
+                  path = f'{prefix}.{key}' if prefix else key
+                  if isinstance(value, str):
+                      out[path] = value
+                  elif isinstance(value, dict):
+                      out.update(leaves(value, path))
+              return out
+
+          meta = {'title', 'version', 'translatedBy', 'cultureName'}
+          en_l, pt_l, br_l = leaves(en), leaves(pt), leaves(br)
+          missing = sorted(set(en_l) - set(pt_l) - meta)
+          covered_br = [p for p in missing if p in br_l]
+          absent_br = [p for p in missing if p not in br_l]
+          br_english = [p for p in covered_br if br_l[p] == en_l[p]]
+          br_translated = [p for p in covered_br if br_l[p] != en_l[p]]
+
+          # Reuse an existing pt-PT value when the exact English source text already
+          # existed under another key whose Portuguese value is available.
+          en_text_to_pt = {}
+          for p, en_text in en_l.items():
+              if p in pt_l and pt_l[p] and pt_l[p] != en_text:
+                  en_text_to_pt.setdefault(en_text, pt_l[p])
+          reusable_by_source = [p for p in missing if en_l[p] in en_text_to_pt]
+
+          print(f'PTBR_VERSION={br.get("version")}')
+          print(f'MISSING_TOTAL={len(missing)}')
+          print(f'PTBR_COVERED={len(covered_br)}')
+          print(f'PTBR_TRANSLATED={len(br_translated)}')
+          print(f'PTBR_STILL_ENGLISH={len(br_english)}')
+          print(f'PTBR_ABSENT={len(absent_br)}')
+          print(f'REUSE_EXISTING_PTPT_BY_ENGLISH_SOURCE={len(reusable_by_source)}')
+          print('PTBR_ABSENT_KEYS:')
+          for p in absent_br:
+              print(f'  {p} = {json.dumps(en_l[p], ensure_ascii=False)}')
+          PY
