@@ -1,0 +1,23 @@
+{
+  "ocr.renameBinaryImageCompareDatabase": "Mudar o nome da base de dados de comparação de imagens binárias",
+  "ocr.saveAllImagesWithHtmlIndexDotDotDot": "Guardar todas as imagens com índice HTML...",
+  "ocr.saveAllImagesWithHtmlIndexPickFolder": "Escolha uma pasta para as imagens e o índice HTML",
+  "ocr.saveAllImagesWithHtmlIndexSaved": "{0} imagens guardadas com um índice HTML",
+  "ocr.startTraining": "Iniciar treino",
+  "ocr.trainNOcrDatabase": "Treinar base de dados nOCR...",
+  "ocr.trainingOptions": "Opções de treino",
+  "options.settings.assaAutoSetResolutionPrompt": "ASSA: perguntar antes de alterar a resolução para corresponder ao vídeo (caso contrário, reamostrar automaticamente)",
+  "options.settings.autoBreakPreferBottomHeavy": "Na quebra automática, dar preferência a uma linha inferior mais longa",
+  "options.settings.autoBreakPreferBottomPercent": "Percentagem para favorecer uma linha inferior mais longa na quebra automática",
+  "options.settings.checkForUpdatesOnStartup": "Verificar atualizações ao iniciar a aplicação",
+  "options.settings.defaultSaveLocation": "Localização predefinida para guardar",
+  "options.settings.defaultSaveLocationLastUsedFolder": "Última pasta utilizada",
+  "options.settings.mergeKeepEndTime": "Combinar linhas: manter o tempo final (permitir sobreposição com a legenda seguinte)",
+  "options.settings.mergeKeepEndTimeOnlyAssa": "Combinar linhas: manter o tempo final apenas para \"Advanced Sub Station Alpha\"",
+  "options.settings.minGapCalculateUseXAsNewGap": "Utilizar \"{0}\" milissegundos como novo intervalo mínimo?",
+  "options.settings.proxyBypassListHint": "Nomes de anfitriões separados por ponto e vírgula que estabelecem ligação direta, por exemplo: \"internal.company.com;example.org\"",
+  "options.settings.showToolbarSpeechToText": "Mostrar ícone de reconhecimento de voz",
+  "options.settings.showToolbarStyleManager": "Mostrar ícone do gestor de estilos (ASSA/SSA/WebVTT)",
+  "options.settings.subtitleGridCenterText": "Centrar texto na grelha de legendas",
+  "options.settings.subtitleGridFormattingHideTags": "Ocultar etiquetas"
+}
