@@ -36,14 +36,22 @@ jobs:
 
           data = clean(data)
           data['main']['xLinesMerged'] = '{0} linhas combinadas'
+          data['main']['videoAndWaveformPreviewTextX'] = 'Pré-visualização do vídeo/forma de onda: {0}'
+          data['video']['audioToText']['removeRepeatedLinesHint'] = 'Remover linhas que repetem a linha anterior palavra por palavra (ciclos do motor)'
           data['video']['textToSpeech']['autoCastReplaceSubtitleQuestion'] = 'Isto substitui a legenda aberta pela transcrição do vídeo. Continuar?'
+          data['video']['textToSpeech']['autoCastNoSpeakersFound'] = 'Não foram encontrados locutores. A transcrição tem de ser gerada por um motor de reconhecimento de voz que distinga os locutores, como o Crisp ASR MOSS Diarize.'
+          data['video']['textToSpeech']['deleteTempFilesDescription'] = 'Elimina a pasta de geração quando a janela «Texto para fala» é fechada. Os ficheiros de áudio e vídeo guardados são mantidos.'
+          data['video']['textToSpeech']['voiceGender'] = 'Género'
+          data['video']['chapters']['chaptersSavedToX'] = 'Capítulos guardados em {0}'
+          data['ocr']['crispEmbedDescription'] = 'Motor de OCR local com vários backends de modelos - transfira o motor e os modelos aqui.'
+          data['options']['settings']['textToSpeechPromptSkipNoiseLines'] = 'Texto para fala: perguntar se deve ignorar linhas de som/música'
           path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
           PY
           if ! git diff --quiet -- src/ui/Assets/Languages/Portuguese.json; then
             git config user.name 'BlackSpirits'
             git config user.email 'blackspirits@gmail.com'
             git add src/ui/Assets/Languages/Portuguese.json
-            git commit -m 'Normalize Portuguese translation QA findings'
+            git commit -m 'Correct Portuguese terminology against English source'
             git push origin HEAD:${{ github.head_ref }}
           fi
 
