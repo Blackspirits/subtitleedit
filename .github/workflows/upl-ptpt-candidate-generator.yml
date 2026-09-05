@@ -1,0 +1,139 @@
+name: UPL pt-PT candidate generator
+
+on:
+  pull_request:
+    branches:
+      - upl/upstream-main-20260905
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Generate review candidates
+        id: generate
+        shell: bash
+        run: |
+          if [ ! -f .upl/generate-ptpt-candidates ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          python - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          folder = Path('src/ui/Assets/Languages')
+          en = json.loads((folder / 'English.json').read_text(encoding='utf-8-sig'))
+          pt = json.loads((folder / 'Portuguese.json').read_text(encoding='utf-8-sig'))
+          br = json.loads((folder / 'Portuguese (Brazil).json').read_text(encoding='utf-8-sig'))
+
+          def leaves(obj, prefix=''):
+              out = {}
+              if not isinstance(obj, dict):
+                  return out
+              for key, value in obj.items():
+                  path = f'{prefix}.{key}' if prefix else key
+                  if isinstance(value, str):
+                      out[path] = value
+                  elif isinstance(value, dict):
+                      out.update(leaves(value, path))
+              return out
+
+          en_l, pt_l, br_l = leaves(en), leaves(pt), leaves(br)
+          meta = {'title', 'version', 'translatedBy', 'cultureName'}
+          missing = sorted(set(en_l) - set(pt_l) - meta)
+
+          # Exact source-text reuse is safest: if the same English source already has
+          # a Portuguese translation elsewhere, keep the established pt-PT wording.
+          reuse = {}
+          for path, source in en_l.items():
+              if path in pt_l and pt_l[path] and pt_l[path] != source:
+                  reuse.setdefault(source, pt_l[path])
+
+          # Conservative lexical normalization only. It deliberately avoids ambiguous
+          # words such as "fonte", "quadro" and "padrão"; those are reviewed manually.
+          replacements = [
+              (r'\barquivos\b', 'ficheiros'),
+              (r'\barquivo\b', 'ficheiro'),
+              (r'\bArquivos\b', 'Ficheiros'),
+              (r'\bArquivo\b', 'Ficheiro'),
+              (r'\busuários\b', 'utilizadores'),
+              (r'\busuário\b', 'utilizador'),
+              (r'\bUsuários\b', 'Utilizadores'),
+              (r'\bUsuário\b', 'Utilizador'),
+              (r'\btelas\b', 'ecrãs'),
+              (r'\btela\b', 'ecrã'),
+              (r'\bTelas\b', 'Ecrãs'),
+              (r'\bTela\b', 'Ecrã'),
+              (r'\bdiretórios\b', 'pastas'),
+              (r'\bdiretório\b', 'pasta'),
+              (r'\bDiretórios\b', 'Pastas'),
+              (r'\bDiretório\b', 'Pasta'),
+              (r'\bconfigurações\b', 'definições'),
+              (r'\bconfiguração\b', 'definição'),
+              (r'\bConfigurações\b', 'Definições'),
+              (r'\bConfiguração\b', 'Definição'),
+              (r'\bexcluir\b', 'eliminar'),
+              (r'\bExcluir\b', 'Eliminar'),
+              (r'\bexcluído\b', 'eliminado'),
+              (r'\bexcluída\b', 'eliminada'),
+              (r'\bsomente\b', 'apenas'),
+              (r'\bSomente\b', 'Apenas'),
+              (r'\baplicativo\b', 'aplicação'),
+              (r'\bAplicativo\b', 'Aplicação'),
+              (r'\bconexões\b', 'ligações'),
+              (r'\bconexão\b', 'ligação'),
+              (r'\bConexões\b', 'Ligações'),
+              (r'\bConexão\b', 'Ligação'),
+              (r'\bcaractere\b', 'caráter'),
+              (r'\bCaractere\b', 'Caráter'),
+          ]
+
+          def normalize(value):
+              for pattern, replacement in replacements:
+                  value = re.sub(pattern, replacement, value)
+              return value
+
+          Path('.upl').mkdir(exist_ok=True)
+          out = Path('.upl/ptpt-candidates.jsonl')
+          with out.open('w', encoding='utf-8') as f:
+              for path in missing:
+                  if en_l[path] in reuse:
+                      candidate = reuse[en_l[path]]
+                      source = 'existing-ptPT-same-English-source'
+                  else:
+                      candidate = normalize(br_l[path])
+                      source = 'pt-BR-normalized-review-required'
+                  f.write(json.dumps({
+                      'path': path,
+                      'en': en_l[path],
+                      'br': br_l[path],
+                      'candidate': candidate,
+                      'source': source,
+                  }, ensure_ascii=False) + '\n')
+
+          Path('.upl/generate-ptpt-candidates').unlink()
+          print(f'Generated {len(missing)} candidates in {out}')
+          PY
+
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Commit candidate review file
+        if: steps.generate.outputs.changed == 'true'
+        shell: bash
+        run: |
+          git config user.name "BlackSpirits"
+          git config user.email "11444904+Blackspirits@users.noreply.github.com"
+          git add .upl
+          git commit -m "chore: generate pt-PT translation review candidates"
+          git push origin HEAD:${{ github.head_ref }}
