@@ -315,6 +315,11 @@ public class BinaryEditWindow : Window
                     Header = Se.Language.Tools.ImageBasedEdit.CropImages,
                     Command = vm.CropCommand,
                 },
+                new MenuItem
+                {
+                    Header = Se.Language.General.VideoResolution + "...",
+                    Command = vm.ChangeResolutionCommand,
+                },
                 new Separator(),
                 new MenuItem
                 {

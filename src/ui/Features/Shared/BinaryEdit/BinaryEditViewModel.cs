@@ -1592,6 +1592,50 @@ public partial class BinaryEditViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private async Task ChangeResolution()
+    {
+        if (Window == null)
+        {
+            return;
+        }
+
+        if (Subtitles.Count == 0)
+        {
+            await MessageBox.Show(Window, Se.Language.General.Information,
+                Se.Language.Tools.ImageBasedEdit.NoImageSubtitlesLoaded,
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var items = Subtitles.ToList();
+        var fromWidth = ScreenWidth;
+        var fromHeight = ScreenHeight;
+        using var result = await _windowService.ShowDialogAsync<BinaryChangeResolution.BinaryChangeResolutionWindow, BinaryChangeResolution.BinaryChangeResolutionViewModel>(
+            Window, vm => vm.Initialize(items, fromWidth, fromHeight));
+
+        if (!result.OkPressed)
+        {
+            return;
+        }
+
+        // The dialog scaled bitmaps and positions; the canvas size is ours (the setters push
+        // it to every item and refresh the overlay and position monitor).
+        ScreenWidth = result.NewWidth;
+        ScreenHeight = result.NewHeight;
+
+        if (SubtitleGrid != null)
+        {
+            var currentIndex = SubtitleGrid.SelectedIndex;
+            SubtitleGrid.ItemsSource = null;
+            SubtitleGrid.ItemsSource = Subtitles;
+            SubtitleGrid.SelectedIndex = currentIndex;
+        }
+
+        UpdateOverlayPosition();
+        RefreshStatusText();
+    }
+
+    [RelayCommand]
     private async Task ResizeImagesSelectedLines()
     {
         if (Window == null)
