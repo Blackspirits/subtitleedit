@@ -1,0 +1,63 @@
+name: UPL pt-PT candidate QA
+
+on:
+  pull_request:
+    branches:
+      - upl/upstream-main-20260905
+
+jobs:
+  review-qa:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Flag candidates that still need pt-PT review
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          candidate_file = Path('.upl/ptpt-candidates.jsonl')
+          if not candidate_file.exists():
+              print('No candidate file; nothing to review.')
+              raise SystemExit(0)
+
+          corrections = {}
+          for p in sorted(Path('.upl').glob('ptpt-corrections-*.json')):
+              corrections.update(json.loads(p.read_text(encoding='utf-8')))
+
+          items = [json.loads(line) for line in candidate_file.read_text(encoding='utf-8').splitlines() if line.strip()]
+
+          lexical = re.compile(
+              r'\b(mouse|arquivo|arquivos|usuário|usuários|usuária|usuárias|tela|telas|diretório|diretórios|configuração|configurações|aplicativo|aplicativos|somente|caractere|caracteres|quadrinhos|retrô|coletor|salvando|salvo|salva|pressione|pressionar|baixar|download|downloads)\b',
+              re.IGNORECASE,
+          )
+
+          flagged = []
+          for item in items:
+              path = item['path']
+              value = corrections.get(path, item['candidate'])
+              reasons = []
+              if lexical.search(value):
+                  reasons.append('lexical')
+              if re.search(r'\bfont(s)?\b', item['en'], re.I) and re.search(r'\bfonte(s)?\b', value, re.I):
+                  reasons.append('font-terminology')
+              if re.search(r'\bframe(s)?\b', item['en'], re.I) and re.search(r'\bquadro(s)?\b', value, re.I):
+                  reasons.append('frame-terminology')
+              if value == item['en'] and re.search(r'[A-Za-z]{3}', value):
+                  reasons.append('still-English')
+              if re.search(r'\bem (um|uma|uns|umas)\b', value, re.I):
+                  reasons.append('ptPT-contraction-review')
+              if re.search(r'\b(seu|sua|seus|suas)\b', value, re.I):
+                  reasons.append('possessive-review')
+              if reasons:
+                  flagged.append((path, value, ','.join(sorted(set(reasons))), item['en']))
+
+          print(f'TOTAL_CANDIDATES={len(items)}')
+          print(f'CORRECTIONS_APPLIED={len(corrections)}')
+          print(f'FLAGGED={len(flagged)}')
+          for path, value, reasons, source in flagged:
+              print(f'FLAG\t{path}\t{reasons}\t{json.dumps(value, ensure_ascii=False)}\tEN={json.dumps(source, ensure_ascii=False)}')
+          PY
