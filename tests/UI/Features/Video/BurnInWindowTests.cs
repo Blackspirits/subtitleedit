@@ -134,8 +134,9 @@ public class BurnInWindowTests : IDisposable
         var middleColumn = FindMiddleColumn(FindSettingsGrid(rootGrid).SettingsGrid);
         Assert.Equal(GridUnitType.Auto, middleColumn.RowDefinitions[1].Height.GridUnitType);
         Assert.Equal(GridUnitType.Star, middleColumn.RowDefinitions[^1].Height.GridUnitType);
+        Assert.NotNull(vm.VideoPlayerControl);
         Assert.Equal(360, vm.VideoPlayerControl.Height);
-        Assert.Equal(VerticalAlignment.Top, vm.VideoPlayerControl!.VerticalAlignment);
+        Assert.Equal(VerticalAlignment.Top, vm.VideoPlayerControl.VerticalAlignment);
 
         // The left column is one panel in the settings grid's single row. It must fit entirely
         // above the progress view - the regression this guards against drew
