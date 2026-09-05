@@ -1,0 +1,54 @@
+name: UPL pt-PT translation diff
+
+on:
+  pull_request:
+    branches:
+      - upl/upstream-main-20260905
+
+jobs:
+  ptpt-diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Compare pt-PT leaf strings with English
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          folder = Path('src/ui/Assets/Languages')
+          en = json.loads((folder / 'English.json').read_text(encoding='utf-8-sig'))
+          pt = json.loads((folder / 'Portuguese.json').read_text(encoding='utf-8-sig'))
+
+          def leaves(obj, prefix=''):
+              out = {}
+              if not isinstance(obj, dict):
+                  return out
+              for key, value in obj.items():
+                  path = f'{prefix}.{key}' if prefix else key
+                  if isinstance(value, str):
+                      out[path] = value
+                  elif isinstance(value, dict):
+                      out.update(leaves(value, path))
+              return out
+
+          en_l = leaves(en)
+          pt_l = leaves(pt)
+          metadata = {'title', 'version', 'translatedBy', 'cultureName'}
+          missing = sorted(set(en_l) - set(pt_l) - metadata)
+          extra = sorted(set(pt_l) - set(en_l) - metadata)
+
+          print(f'English version: {en.get("version")}')
+          print(f'Portuguese version: {pt.get("version")}')
+          print(f'MISSING_COUNT={len(missing)}')
+          for path in missing:
+              print(f'MISSING\t{path}\t{json.dumps(en_l[path], ensure_ascii=False)}')
+          print(f'EXTRA_COUNT={len(extra)}')
+          for path in extra:
+              print(f'EXTRA\t{path}\t{json.dumps(pt_l[path], ensure_ascii=False)}')
+
+          if missing or extra:
+              raise SystemExit(1)
+          PY
