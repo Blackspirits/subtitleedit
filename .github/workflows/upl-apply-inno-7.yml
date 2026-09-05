@@ -1,0 +1,86 @@
+name: UPL apply Inno Setup 7.1.0
+
+on:
+  pull_request:
+    branches:
+      - upl/inno-7.1.0-base
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Apply verified Inno Setup 7.1.0 pin
+        id: apply
+        shell: bash
+        run: |
+          if [ ! -f .upl/apply-inno-7.1.0 ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/build-ui.yml')
+          text = path.read_text(encoding='utf-8')
+
+          old = '''      - name: Install Inno Setup 6.7.3
+        # Pin an exact version: the .iss script requires 6.7.3+, but Chocolatey still ships 6.7.1.
+        run: |
+          $url = "https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe"
+          Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\\innosetup.exe"
+          Start-Process -FilePath "$env:RUNNER_TEMP\\innosetup.exe" `
+            -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/SP-" -Wait
+
+      - name: Build Inno Setup installer
+        run: |
+          & "C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe" "installer\\WindowsInno\\Subtitle_Edit_Installer.iss"
+'''
+
+          new = '''      - name: Install Inno Setup 7.1.0 x64
+        # Pin the release toolchain and verify the official installer before executing it.
+        run: |
+          $url = "https://github.com/jrsoftware/issrc/releases/download/is-7_1_0/innosetup-7.1.0-x64.exe"
+          $expectedSha256 = "0362a383ed217d4c4239b5933866dd96d3eb2102737da92f80f6057a4b40df2f"
+          $installer = "$env:RUNNER_TEMP\\innosetup.exe"
+          Invoke-WebRequest -Uri $url -OutFile $installer
+          $actualSha256 = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualSha256 -ne $expectedSha256) {
+            throw "Inno Setup SHA-256 mismatch: expected $expectedSha256, got $actualSha256"
+          }
+          Start-Process -FilePath $installer `
+            -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/SP-" -Wait
+
+      - name: Build Inno Setup installer
+        run: |
+          & "$env:ProgramFiles\\Inno Setup 7\\ISCC.exe" "installer\\WindowsInno\\Subtitle_Edit_Installer.iss"
+'''
+
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f'Expected exactly one Inno 6.7.3 block, found {count}')
+          path.write_text(text.replace(old, new), encoding='utf-8')
+          PY
+
+          rm .upl/apply-inno-7.1.0
+          rmdir .upl 2>/dev/null || true
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Commit patch
+        if: steps.apply.outputs.changed == 'true'
+        shell: bash
+        run: |
+          git config user.name "BlackSpirits"
+          git config user.email "11444904+Blackspirits@users.noreply.github.com"
+          git add .github/workflows/build-ui.yml .upl || true
+          git commit -m "Update release build to Inno Setup 7.1.0"
+          git push origin HEAD:${{ github.head_ref }}
