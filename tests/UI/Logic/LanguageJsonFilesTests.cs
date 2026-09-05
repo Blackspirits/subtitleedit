@@ -35,31 +35,29 @@ public class LanguageJsonFilesTests
     }
 
     [Fact]
-    public void Portuguese_HasSameTranslationKeySetAsEnglish()
+    public void Portuguese_HasSameTranslationLeafKeySetAsEnglish()
     {
         var folder = GetLanguagesFolder();
         using var english = JsonDocument.Parse(File.ReadAllText(Path.Combine(folder, "English.json")));
         using var portuguese = JsonDocument.Parse(File.ReadAllText(Path.Combine(folder, "Portuguese.json")));
 
-        var englishKeys = GetPropertyPaths(english.RootElement).ToHashSet(StringComparer.Ordinal);
-        var portugueseKeys = GetPropertyPaths(portuguese.RootElement).ToHashSet(StringComparer.Ordinal);
+        var englishEntries = GetStringEntries(english.RootElement).ToDictionary(x => x.Path, x => x.Value, StringComparer.Ordinal);
+        var portugueseEntries = GetStringEntries(portuguese.RootElement).ToDictionary(x => x.Path, x => x.Value, StringComparer.Ordinal);
 
-        // Metadata is intentionally versioned independently from translation keys.
-        englishKeys.Remove("title");
-        englishKeys.Remove("version");
-        englishKeys.Remove("translatedBy");
-        englishKeys.Remove("cultureName");
-        portugueseKeys.Remove("title");
-        portugueseKeys.Remove("version");
-        portugueseKeys.Remove("translatedBy");
-        portugueseKeys.Remove("cultureName");
+        foreach (var metadataKey in new[] { "title", "version", "translatedBy", "cultureName" })
+        {
+            englishEntries.Remove(metadataKey);
+            portugueseEntries.Remove(metadataKey);
+        }
 
-        var missing = englishKeys.Except(portugueseKeys).OrderBy(x => x).ToArray();
-        var extra = portugueseKeys.Except(englishKeys).OrderBy(x => x).ToArray();
+        var missing = englishEntries.Keys.Except(portugueseEntries.Keys).OrderBy(x => x).ToArray();
+        var extra = portugueseEntries.Keys.Except(englishEntries.Keys).OrderBy(x => x).ToArray();
+        var missingWithEnglish = missing.Select(x => $"{x} = {JsonSerializer.Serialize(englishEntries[x])}");
 
         Assert.True(missing.Length == 0 && extra.Length == 0,
-            $"Portuguese.json key drift. Missing ({missing.Length}): {string.Join(", ", missing)}. " +
-            $"Extra ({extra.Length}): {string.Join(", ", extra)}.");
+            $"Portuguese.json translation drift. Missing leaf strings ({missing.Length}):\n" +
+            string.Join("\n", missingWithEnglish) +
+            $"\nExtra leaf strings ({extra.Length}):\n" + string.Join("\n", extra));
     }
 
     [Fact]
@@ -71,7 +69,7 @@ public class LanguageJsonFilesTests
         Assert.Contains(files, f => Path.GetFileName(f) == "English.json");
     }
 
-    private static IEnumerable<string> GetPropertyPaths(JsonElement element, string prefix = "")
+    private static IEnumerable<(string Path, string Value)> GetStringEntries(JsonElement element, string prefix = "")
     {
         if (element.ValueKind != JsonValueKind.Object)
         {
@@ -81,9 +79,13 @@ public class LanguageJsonFilesTests
         foreach (var property in element.EnumerateObject())
         {
             var path = string.IsNullOrEmpty(prefix) ? property.Name : $"{prefix}.{property.Name}";
-            yield return path;
+            if (property.Value.ValueKind == JsonValueKind.String)
+            {
+                yield return (path, property.Value.GetString() ?? string.Empty);
+                continue;
+            }
 
-            foreach (var child in GetPropertyPaths(property.Value, path))
+            foreach (var child in GetStringEntries(property.Value, path))
             {
                 yield return child;
             }
