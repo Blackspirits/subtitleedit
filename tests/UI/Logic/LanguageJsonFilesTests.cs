@@ -35,12 +35,59 @@ public class LanguageJsonFilesTests
     }
 
     [Fact]
+    public void Portuguese_HasSameTranslationKeySetAsEnglish()
+    {
+        var folder = GetLanguagesFolder();
+        using var english = JsonDocument.Parse(File.ReadAllText(Path.Combine(folder, "English.json")));
+        using var portuguese = JsonDocument.Parse(File.ReadAllText(Path.Combine(folder, "Portuguese.json")));
+
+        var englishKeys = GetPropertyPaths(english.RootElement).ToHashSet(StringComparer.Ordinal);
+        var portugueseKeys = GetPropertyPaths(portuguese.RootElement).ToHashSet(StringComparer.Ordinal);
+
+        // Metadata is intentionally versioned independently from translation keys.
+        englishKeys.Remove("title");
+        englishKeys.Remove("version");
+        englishKeys.Remove("translatedBy");
+        englishKeys.Remove("cultureName");
+        portugueseKeys.Remove("title");
+        portugueseKeys.Remove("version");
+        portugueseKeys.Remove("translatedBy");
+        portugueseKeys.Remove("cultureName");
+
+        var missing = englishKeys.Except(portugueseKeys).OrderBy(x => x).ToArray();
+        var extra = portugueseKeys.Except(englishKeys).OrderBy(x => x).ToArray();
+
+        Assert.True(missing.Length == 0 && extra.Length == 0,
+            $"Portuguese.json key drift. Missing ({missing.Length}): {string.Join(", ", missing)}. " +
+            $"Extra ({extra.Length}): {string.Join(", ", extra)}.");
+    }
+
+    [Fact]
     public void LanguagesFolder_ContainsLanguageFiles()
     {
         var files = Directory.GetFiles(GetLanguagesFolder(), "*.json");
 
         Assert.NotEmpty(files);
         Assert.Contains(files, f => Path.GetFileName(f) == "English.json");
+    }
+
+    private static IEnumerable<string> GetPropertyPaths(JsonElement element, string prefix = "")
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            yield break;
+        }
+
+        foreach (var property in element.EnumerateObject())
+        {
+            var path = string.IsNullOrEmpty(prefix) ? property.Name : $"{prefix}.{property.Name}";
+            yield return path;
+
+            foreach (var child in GetPropertyPaths(property.Value, path))
+            {
+                yield return child;
+            }
+        }
     }
 
     /// <summary>
