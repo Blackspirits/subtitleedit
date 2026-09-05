@@ -1,0 +1,13 @@
+{
+  "file.ebuSaveOptions.maxLengthErrorTeletextSingleHeight": "Linha {0}: 38 (e não {1}) deve ser o número máximo de carateres para texto branco de altura simples",
+  "file.ebuSaveOptions.maxLengthErrorTeletextWhite": "Linha {0}-{1}: 37 (e não {2}) deve ser o número máximo de carateres para texto branco de altura dupla",
+  "file.ebuSaveOptions.previewFont": "Tipo de letra personalizado",
+  "file.ebuSaveOptions.previewFontDefault": "(utilizar o tipo de letra da pré-visualização do vídeo)",
+  "file.ebuSaveOptions.previewFontSample": "A rápida raposa castanha salta sobre o cão preguiçoso - 0123456789",
+  "file.export.fullFrameImage": "Imagem de fotograma completo",
+  "file.export.fullFrameImageHint": "Fazer cada imagem ter o tamanho do fotograma do vídeo, com a legenda na respetiva posição",
+  "file.export.textEffectComic": "Banda desenhada",
+  "file.export.textEffectGradientGold": "Gradiente (dourado)",
+  "file.export.textEffectHollow": "Vazado (apenas contorno)",
+  "file.export.textEffectRetro80s": "Retro anos 80"
+}

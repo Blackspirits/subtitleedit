@@ -1,0 +1,21 @@
+{
+  "main.allowEditHintAllLines": "O original completo está visível no ecrã, pelo que ao guardá-lo todas as linhas são mantidas.",
+  "main.allowEditHintMatchingOnlyX": "Ao guardar o original seriam escritas apenas as linhas apresentadas - as outras {0} seriam perdidas.",
+  "main.errorLoadRawPgsPrompt": "Este ficheiro parece ser um fluxo PGS em bruto sem os cabeçalhos Blu-ray SUP \"PG\", pelo que não contém tempos.\r\n\r\nIsto acontece normalmente quando uma faixa PGS de um Matroska é extraída em modo \"raw\". Para obter os tempos corretos, volte a extrair a faixa no modo normal (por exemplo, com \"mkvextract tracks\" sem --raw) ou abra diretamente o ficheiro Matroska original no Subtitle Edit.\r\n\r\nPretende importar na mesma as imagens das legendas, com tempos provisórios gerados automaticamente que terão de ser corrigidos manualmente?",
+  "main.formatLimitWarningDoNotShowAgain": "Não voltar a mostrar este aviso",
+  "main.formatLimitWarningSaveAnyway": "Guardar na mesma",
+  "main.formatLimitWarningTextWillBeRewrapped": "Ao guardar, estas legendas serão novamente quebradas ou truncadas para respeitar os limites, pelo que o ficheiro poderá não corresponder ao que é apresentado aqui.",
+  "main.menu.assaFontCollector": "_Coletor de tipos de letra...",
+  "main.menu.showSelectedLinesEarlierLater": "Mostrar linhas selecionadas mais cedo/mais tarde...",
+  "main.originalIsReadOnlyReference": "A legenda original está aberta como referência apenas de leitura",
+  "main.originalTextReadOnly": "Texto original (apenas de leitura)",
+  "main.pastedXOfYLinesOverSelectedLines": "Coladas {0} de {1} linha(s) sobre as linhas selecionadas - as restantes não cabiam na seleção",
+  "main.showAllOriginalLinesHint": "As linhas sem correspondência são apresentadas como linhas adicionais, permitindo ver o que falta na tradução.",
+  "main.showAllOriginalLinesX": "Mostrar todas as linhas originais ({0} sem correspondência aqui)",
+  "main.showMatchingOriginalLinesHint": "As outras {0} linhas originais não são apresentadas em lado nenhum.",
+  "main.showMatchingOriginalLinesNote": "Permanecem no ficheiro, exceto se guardar o original",
+  "main.toolbar.getFrameRateFromVideoFileHint": "Obter taxa de fotogramas do ficheiro de vídeo",
+  "main.toolbar.pointSyncHint": "Sincronização por pontos através de outra legenda {0}",
+  "main.toolbar.speechToTextHint": "Reconhecimento de voz {0}",
+  "main.toolbar.webVttStylesHint": "Gestor de estilos WebVTT"
+}

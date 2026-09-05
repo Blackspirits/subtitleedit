@@ -1,0 +1,18 @@
+{
+  "options.shortcuts.selectionToSentenceCase": "Caixa de texto: seleção para maiúscula inicial de frase",
+  "options.shortcuts.selectionToggleCasing": "Caixa de texto: alternar capitalização (MAIÚSCULAS -> minúsculas -> Iniciais)",
+  "options.shortcuts.surroundWithNumberX": "Envolver com #{0}",
+  "options.shortcuts.textBoxDeleteForward": "Caixa de texto: eliminar seleção ou caráter seguinte (eliminação para a frente)",
+  "options.shortcuts.toggleForcedSelectedLines": "Alternar estado forçado (linhas selecionadas)",
+  "options.shortcuts.waveformGuessEnd": "Determinar tempo final a partir da forma de onda",
+  "options.shortcuts.waveformGuessStart": "Determinar tempo inicial a partir da forma de onda",
+  "sourceView.discardChanges": "O texto de origem foi alterado.\r\nIgnorar as alterações?",
+  "sourceView.discardChangesTitle": "Ignorar alterações?",
+  "sourceView.regularExpressionTooSlowX": "A expressão regular excedeu {0} segundos - tente um padrão mais simples",
+  "spellCheck.playCurrentLineHint": "Reproduzir a linha atual no leitor de vídeo e pausar no fim",
+  "sync.syncPointCandidateInfo": "As linhas que começam após {0}+ segundos de silêncio são realçadas - costumam constituir pontos de sincronização fiáveis",
+  "sync.syncPointTimeCode": "Tempo do ponto de sincronização",
+  "tools.batchConvert.assaSource": "Origem ASSA",
+  "tools.batchConvert.convertColorsToDialogReBreakLines": "Voltar a quebrar linhas",
+  "tools.batchConvert.convertColorsToDialogRemoveColorTags": "Remover etiquetas de cor"
+}

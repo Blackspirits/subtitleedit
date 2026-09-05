@@ -35,12 +35,61 @@ public class LanguageJsonFilesTests
     }
 
     [Fact]
+    public void Portuguese_HasSameTranslationLeafKeySetAsEnglish()
+    {
+        var folder = GetLanguagesFolder();
+        using var english = JsonDocument.Parse(File.ReadAllText(Path.Combine(folder, "English.json")));
+        using var portuguese = JsonDocument.Parse(File.ReadAllText(Path.Combine(folder, "Portuguese.json")));
+
+        var englishEntries = GetStringEntries(english.RootElement).ToDictionary(x => x.Path, x => x.Value, StringComparer.Ordinal);
+        var portugueseEntries = GetStringEntries(portuguese.RootElement).ToDictionary(x => x.Path, x => x.Value, StringComparer.Ordinal);
+
+        foreach (var metadataKey in new[] { "title", "version", "translatedBy", "cultureName" })
+        {
+            englishEntries.Remove(metadataKey);
+            portugueseEntries.Remove(metadataKey);
+        }
+
+        var missing = englishEntries.Keys.Except(portugueseEntries.Keys).OrderBy(x => x).ToArray();
+        var extra = portugueseEntries.Keys.Except(englishEntries.Keys).OrderBy(x => x).ToArray();
+        var missingWithEnglish = missing.Select(x => $"{x} = {JsonSerializer.Serialize(englishEntries[x])}");
+
+        Assert.True(missing.Length == 0 && extra.Length == 0,
+            $"Portuguese.json translation drift. Missing leaf strings ({missing.Length}):\n" +
+            string.Join("\n", missingWithEnglish) +
+            $"\nExtra leaf strings ({extra.Length}):\n" + string.Join("\n", extra));
+    }
+
+    [Fact]
     public void LanguagesFolder_ContainsLanguageFiles()
     {
         var files = Directory.GetFiles(GetLanguagesFolder(), "*.json");
 
         Assert.NotEmpty(files);
         Assert.Contains(files, f => Path.GetFileName(f) == "English.json");
+    }
+
+    private static IEnumerable<(string Path, string Value)> GetStringEntries(JsonElement element, string prefix = "")
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            yield break;
+        }
+
+        foreach (var property in element.EnumerateObject())
+        {
+            var path = string.IsNullOrEmpty(prefix) ? property.Name : $"{prefix}.{property.Name}";
+            if (property.Value.ValueKind == JsonValueKind.String)
+            {
+                yield return (path, property.Value.GetString() ?? string.Empty);
+                continue;
+            }
+
+            foreach (var child in GetStringEntries(property.Value, path))
+            {
+                yield return child;
+            }
+        }
     }
 
     /// <summary>

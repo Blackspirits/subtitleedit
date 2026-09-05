@@ -1,0 +1,19 @@
+{
+  "assa.trimFontsDotDotDot": "Reduzir tipos de letra aos carateres utilizados...",
+  "assa.trimFontsNoFontsToTrim": "Não existem tipos de letra incorporados para reduzir.",
+  "assa.trimFontsPromptX": "Reduzir {0} tipo(s) de letra incorporado(s) apenas aos carateres atualmente utilizados?\r\n\r\nO texto adicionado posteriormente à legenda poderá apresentar carateres em falta, por isso faça esta redução apenas como último passo.",
+  "assa.trimFontsReasonCouldNotParse": "não foi possível ler o tipo de letra",
+  "assa.trimFontsReasonFontCollection": "as coleções de tipos de letra não são suportadas",
+  "assa.trimFontsReasonNotTrueType": "apenas os tipos de letra TrueType podem ser reduzidos",
+  "assa.trimFontsTotalSavingX": "Poupança total: {0}",
+  "assa.trimFontsXFontsTrimmedSavedYZ": "{0} tipo(s) de letra reduzido(s), poupando {1}.\r\n\r\n{2}",
+  "edit.modifySelection.hearingImpaired": "Deficientes auditivos (SDH)",
+  "edit.modifySelection.hearingImpairedLineContains": "A linha contém",
+  "edit.modifySelection.hearingImpairedSettingsHint": "Os detalhes são definidos em Ferramentas > Remover texto para deficientes auditivos",
+  "edit.modifySelection.hearingImpairedUppercaseLine": "Linha em maiúsculas",
+  "edit.multipleReplace.regularExpressionTooSlowX": "A expressão regular excedeu {0} segundos - a regra será ignorada; tente um padrão mais simples",
+  "edit.regularExpressionContextMenu.inCharacterGroup": "No grupo de carateres ([test])",
+  "edit.regularExpressionContextMenu.nonDigit": "Não é um dígito (\\D)",
+  "edit.regularExpressionContextMenu.nonSpaceCharacter": "Caráter que não seja espaço (\\S)",
+  "edit.regularExpressionContextMenu.nonWordBoundary": "Não é limite de palavra (\\B)"
+}
