@@ -2937,7 +2937,7 @@ public static class UiUtil
         return control;
     }
 
-    private static bool IsDarkTheme()
+    public static bool IsDarkTheme()
     {
         var app = Application.Current;
         if (app == null)
