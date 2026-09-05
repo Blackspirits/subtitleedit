@@ -168,11 +168,13 @@ public class SeTools
     public int GoogleCloudSttTimeoutSeconds { get; set; } = 3600;
 
     /// <summary>
-    /// Bills at roughly a fifth of the normal rate ($0.003 vs $0.016 per minute) in
-    /// exchange for no latency guarantee, so it is off by default. Measured at 13.6x
-    /// realtime on a 140 minute episode, but Google promises nothing.
+    /// Bills at roughly a fifth of the normal rate, $0.003 against $0.016 per minute, so a
+    /// 2.5 hour episode costs about $0.44 instead of $2.32. On by default: the saving is
+    /// large, it is money the user spends without ever being asked, and it measured 13.6x
+    /// realtime on a 140 minute episode. Google gives no latency guarantee for it, so set
+    /// this to false in Settings.json if a run needs to come back as fast as possible.
     /// </summary>
-    public bool GoogleCloudSttDynamicBatching { get; set; }
+    public bool GoogleCloudSttDynamicBatching { get; set; } = true;
 
     public List<string> FindHistory { get; set; } = new List<string>();
     public bool AllowSingleLetterShortcutsInTextbox { get; set; }

@@ -67,6 +67,9 @@ public class GoogleCloudSttEngine : IOnlineSttEngine
         "Long audio must be read from a Cloud Storage bucket, so one named <project>-subtitle-edit-stt is created " +
         "on first use (another name can be set as GoogleCloudSttBucketName in Settings.json). Uploaded audio is " +
         "deleted after each run.\n\n" +
+        "Cost: about $0.003 per minute of audio, because dynamic batching is used by default. Google gives no " +
+        "latency guarantee for it, so set GoogleCloudSttDynamicBatching to false in Settings.json to transcribe " +
+        "at the normal rate of about $0.016 per minute instead.\n\n" +
         "Region: 'us' or 'eu' for chirp_3, or a specific region for other models. " +
         "Model: chirp_3, chirp_2, long, latest_long... " +
         "Language hint: leave empty for automatic detection (Chirp models), or a BCP-47 code such as en-US.");

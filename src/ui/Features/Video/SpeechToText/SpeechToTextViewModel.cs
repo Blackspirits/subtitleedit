@@ -133,7 +133,6 @@ public partial class SpeechToTextViewModel : ObservableObject
     [ObservableProperty] private string? _googleCloudSttModel;
     [ObservableProperty] private string? _googleCloudSttLanguage;
     [ObservableProperty] private int _googleCloudSttTimeoutSeconds;
-    [ObservableProperty] private bool _googleCloudSttDynamicBatching;
 
     public Window? Window { get; set; }
 
@@ -383,7 +382,6 @@ public partial class SpeechToTextViewModel : ObservableObject
         GoogleCloudSttModel = Se.Settings.Tools.GoogleCloudSttModel;
         GoogleCloudSttLanguage = Se.Settings.Tools.GoogleCloudSttLanguage;
         GoogleCloudSttTimeoutSeconds = Se.Settings.Tools.GoogleCloudSttTimeoutSeconds;
-        GoogleCloudSttDynamicBatching = Se.Settings.Tools.GoogleCloudSttDynamicBatching;
 
         var savedChoice = Se.Settings.Tools.AudioToText.WhisperChoice;
         var whisperCppEngine = Engines.OfType<WhisperCppEngine>().FirstOrDefault();
@@ -469,7 +467,6 @@ public partial class SpeechToTextViewModel : ObservableObject
         Se.Settings.Tools.GoogleCloudSttModel = GoogleCloudSttModel ?? "chirp_3";
         Se.Settings.Tools.GoogleCloudSttLanguage = GoogleCloudSttLanguage ?? string.Empty;
         Se.Settings.Tools.GoogleCloudSttTimeoutSeconds = GoogleCloudSttTimeoutSeconds;
-        Se.Settings.Tools.GoogleCloudSttDynamicBatching = GoogleCloudSttDynamicBatching;
 
         Se.SaveSettings();
     }

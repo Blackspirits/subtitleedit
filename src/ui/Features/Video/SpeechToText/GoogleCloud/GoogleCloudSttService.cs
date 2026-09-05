@@ -25,7 +25,7 @@ public class GoogleCloudSttSettings
     public string Language { get; set; } = string.Empty;
     public string BucketName { get; set; } = string.Empty;
     public int TimeoutSeconds { get; set; } = 3600;
-    public bool DynamicBatching { get; set; }
+    public bool DynamicBatching { get; set; } = true;
     public Action<string>? Logger { get; set; }
 
     public static GoogleCloudSttSettings FromConfiguration() => new()
@@ -396,8 +396,8 @@ public class GoogleCloudSttService : ISttTranscriber
         var files = new[] { new { uri = gcsUri } };
         var output = new { inlineResponseConfig = new { } };
 
-        // DYNAMIC_BATCHING is billed at about a fifth of the normal rate. Only sent when
-        // asked for: it carries no latency guarantee, and the default timeout is an hour.
+        // DYNAMIC_BATCHING is billed at about a fifth of the normal rate, so it is the
+        // default. It carries no latency guarantee, which is why it stays switchable.
         return settings.DynamicBatching
             ? JsonSerializer.Serialize(new { config, files, recognitionOutputConfig = output, processingStrategy = "DYNAMIC_BATCHING" })
             : JsonSerializer.Serialize(new { config, files, recognitionOutputConfig = output });
