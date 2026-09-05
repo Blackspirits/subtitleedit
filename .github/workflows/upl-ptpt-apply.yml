@@ -1,0 +1,187 @@
+name: UPL pt-PT apply
+
+on:
+  pull_request:
+    branches:
+      - upl/ptpt-5.2.0-base-a1e4255
+
+permissions:
+  contents: write
+
+jobs:
+  build-ptpt:
+    if: github.head_ref == 'upl/ptpt-5.2.0'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Fetch reviewed translation dossier
+        run: git fetch origin upl/release-readiness-5.2.0:refs/remotes/origin/upl/release-readiness-5.2.0
+
+      - name: Rebuild Portuguese.json from canonical English structure
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import re
+          import subprocess
+          from pathlib import Path
+
+          LANG = Path('src/ui/Assets/Languages')
+          EN_PATH = LANG / 'English.json'
+          PT_PATH = LANG / 'Portuguese.json'
+          META = {'title', 'version', 'translatedBy', 'cultureName'}
+          DOSSIER_REF = 'origin/upl/release-readiness-5.2.0'
+
+          def load_json(path):
+              return json.loads(path.read_text(encoding='utf-8-sig'))
+
+          def git_show(path):
+              return subprocess.check_output(
+                  ['git', 'show', f'{DOSSIER_REF}:{path}'],
+                  text=True,
+                  encoding='utf-8',
+              )
+
+          def flatten(obj, prefix=''):
+              out = {}
+              if not isinstance(obj, dict):
+                  return out
+              for key, value in obj.items():
+                  path = f'{prefix}.{key}' if prefix else key
+                  if isinstance(value, str):
+                      out[path] = value
+                  elif isinstance(value, dict):
+                      out.update(flatten(value, path))
+              return out
+
+          def get_path(obj, path):
+              cur = obj
+              for part in path.split('.'):
+                  if not isinstance(cur, dict) or part not in cur:
+                      return None
+                  cur = cur[part]
+              return cur if isinstance(cur, str) else None
+
+          en = load_json(EN_PATH)
+          pt = load_json(PT_PATH)
+          en_flat = flatten(en)
+          pt_flat = flatten(pt)
+
+          candidates = {}
+          for line in git_show('.upl/ptpt-candidates.jsonl').splitlines():
+              if not line.strip():
+                  continue
+              item = json.loads(line)
+              candidates[item['path']] = item
+
+          corrections = {}
+          for n in range(1, 14):
+              corrections.update(json.loads(git_show(f'.upl/ptpt-corrections-{n:02d}.json')))
+
+          missing = sorted(set(en_flat) - set(pt_flat) - META)
+          extra = sorted(set(pt_flat) - set(en_flat) - META)
+          unresolved = []
+          source_changed = []
+          new_values = {}
+
+          for path in missing:
+              item = candidates.get(path)
+              if item is None:
+                  unresolved.append(path)
+                  continue
+              if item['en'] != en_flat[path]:
+                  source_changed.append((path, item['en'], en_flat[path]))
+                  continue
+              new_values[path] = corrections.get(path, item['candidate'])
+
+          print(f'EN_VERSION={en.get("version")}')
+          print(f'PT_VERSION_BEFORE={pt.get("version")}')
+          print(f'MISSING_BEFORE={len(missing)}')
+          print(f'EXTRA_BEFORE={len(extra)}')
+          print(f'REVIEWED_CORRECTIONS={len(corrections)}')
+          print(f'UNRESOLVED_NEW={len(unresolved)}')
+          print(f'ENGLISH_SOURCE_CHANGED={len(source_changed)}')
+
+          if unresolved:
+              print('UNRESOLVED_NEW_KEYS:')
+              for p in unresolved:
+                  print(f'  {p} = {json.dumps(en_flat[p], ensure_ascii=False)}')
+          if source_changed:
+              print('ENGLISH_SOURCE_CHANGED_KEYS:')
+              for p, old, new in source_changed:
+                  print(f'  {p}')
+                  print(f'    reviewed: {json.dumps(old, ensure_ascii=False)}')
+                  print(f'    current:  {json.dumps(new, ensure_ascii=False)}')
+
+          if unresolved or source_changed:
+              raise SystemExit('Refusing to generate: current English source is not fully covered by the reviewed dossier.')
+
+          placeholder_re = re.compile(r'\{(\d+)(?::[^}]*)?\}')
+          placeholder_errors = []
+          for path, value in new_values.items():
+              en_ids = sorted(placeholder_re.findall(en_flat[path]))
+              pt_ids = sorted(placeholder_re.findall(value))
+              if en_ids != pt_ids:
+                  placeholder_errors.append((path, en_ids, pt_ids, en_flat[path], value))
+
+          if placeholder_errors:
+              print('PLACEHOLDER_ERRORS:')
+              for path, en_ids, pt_ids, en_text, pt_text in placeholder_errors:
+                  print(f'  {path}: EN={en_ids} PT={pt_ids}')
+                  print(f'    EN: {json.dumps(en_text, ensure_ascii=False)}')
+                  print(f'    PT: {json.dumps(pt_text, ensure_ascii=False)}')
+              raise SystemExit('Refusing to generate: placeholder mismatch.')
+
+          def rebuild(en_obj, pt_obj, prefix=''):
+              out = {}
+              for key, en_value in en_obj.items():
+                  path = f'{prefix}.{key}' if prefix else key
+                  if isinstance(en_value, dict):
+                      pt_child = pt_obj.get(key, {}) if isinstance(pt_obj, dict) else {}
+                      out[key] = rebuild(en_value, pt_child if isinstance(pt_child, dict) else {}, path)
+                  elif isinstance(en_value, str):
+                      if path == 'version':
+                          out[key] = en_value
+                      elif path in META:
+                          existing = get_path(pt, path)
+                          out[key] = existing if existing is not None else en_value
+                      else:
+                          existing = get_path(pt, path)
+                          if existing is not None:
+                              out[key] = existing
+                          else:
+                              out[key] = new_values[path]
+                  else:
+                      out[key] = en_value
+              return out
+
+          rebuilt = rebuild(en, pt)
+          PT_PATH.write_text(json.dumps(rebuilt, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+          check = load_json(PT_PATH)
+          check_flat = flatten(check)
+          missing_after = sorted(set(en_flat) - set(check_flat) - META)
+          extra_after = sorted(set(check_flat) - set(en_flat) - META)
+          print(f'MISSING_AFTER={len(missing_after)}')
+          print(f'EXTRA_AFTER={len(extra_after)}')
+          print(f'PT_VERSION_AFTER={check.get("version")}')
+          if missing_after or extra_after:
+              raise SystemExit('Structural synchronization failed.')
+          PY
+
+      - name: Commit generated translation
+        shell: bash
+        run: |
+          if git diff --quiet -- src/ui/Assets/Languages/Portuguese.json; then
+            echo 'Portuguese.json already synchronized.'
+            exit 0
+          fi
+          git config user.name 'BlackSpirits'
+          git config user.email 'blackspirits@gmail.com'
+          git add src/ui/Assets/Languages/Portuguese.json
+          git commit -m 'Update Portuguese translation for 5.2.0'
+          git push origin HEAD:${{ github.head_ref }}
