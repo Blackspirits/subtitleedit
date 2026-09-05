@@ -1,0 +1,14 @@
+{
+  "edit.regularExpressionContextMenu.notInCharacterGroup": "Fora do grupo de carateres ([^test])",
+  "edit.regularExpressionContextMenu.wordBoundary": "Limite de palavra (\\b)",
+  "errorList.all": "Todos",
+  "errorList.detailGapToNext": "para a seguinte: {0} < {1} ms",
+  "errorList.detailGapToPrevious": "para a anterior: {0} < {1} ms",
+  "errorList.detailOverlapFromPrevious": "da anterior: {0} ms",
+  "errorList.detailOverlapToNext": "para a seguinte: {0} ms",
+  "errorList.durationTooLongHint": "Superior ao tempo máximo de visualização",
+  "errorList.durationTooShortHint": "Inferior ao tempo mínimo de visualização",
+  "errorList.tip": "Faça duplo clique numa linha (ou prima Enter) para ir até ela. As verificações executadas e os respetivos limites são definidos em Definições > Geral.",
+  "errorList.tooManyLinesHint": "Mais linhas do que o número máximo permitido",
+  "file.ebuSaveOptions.maxLengthErrorTeletextColored": "Linha {0}-{1}: 36 (e não {2}) deve ser o número máximo de carateres para texto colorido de altura dupla"
+}
