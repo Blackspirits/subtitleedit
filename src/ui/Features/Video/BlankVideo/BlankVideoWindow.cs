@@ -3,6 +3,8 @@ using Avalonia.Controls;
 using Avalonia.Data;
 using Avalonia.Input;
 using Avalonia.Layout;
+using Avalonia.Media;
+using Avalonia.Threading;
 using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.Config;
 using Nikse.SubtitleEdit.Logic.ValueConverters;
@@ -65,6 +67,21 @@ public class BlankVideoWindow : Window
         Content = grid;
 
         UiUtil.FocusOnFirstActivation(this, () => { _numericUpDownDuration?.Focus(); }); // initial focus on an input, not an action button - a focused button clicks on bare Space
+
+        // Fit to content once, then freeze: the progress text that appears while generating is
+        // wider than the settings, and with SizeToContent still active the window re-fit itself
+        // on every progress update.
+        Opened += (_, _) => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            var width = ClientSize.Width;
+            var height = ClientSize.Height;
+            SizeToContent = SizeToContent.Manual;
+            if (width > 0 && height > 0)
+            {
+                Width = width;
+                Height = height;
+            }
+        }, DispatcherPriority.Loaded);
     }
 
     private Border MakeVideoSettingsView(BlankVideoViewModel vm)
@@ -217,6 +234,7 @@ public class BlankVideoWindow : Window
         {
             Margin = new Thickness(5, 18, 0, 0),
             VerticalAlignment = VerticalAlignment.Top,
+            TextTrimming = TextTrimming.CharacterEllipsis,
         };
         statusText.Bind(TextBlock.TextProperty, new Binding(nameof(vm.ProgressText)));
         statusText.Bind(TextBlock.IsVisibleProperty, new Binding(nameof(vm.IsGenerating)));
@@ -232,6 +250,7 @@ public class BlankVideoWindow : Window
                 new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
             },
             Width = double.NaN,
+            Height = 44, // reserve the row while idle so the window height does not jump when generating starts
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
 
