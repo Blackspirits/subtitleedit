@@ -1,0 +1,18 @@
+{
+  "file.ignoreFormattingHint": "As linhas que diferem apenas nas etiquetas de formatação, como <i> ou {\\an8}, não contam como diferentes",
+  "file.import.alignViaForcedAligner": "Alinhar tempos através do alinhador forçado...",
+  "file.import.forcedAlignerDownloadEngine": "Transferir/atualizar motor...",
+  "file.import.forcedAlignerModel": "Modelo do alinhador",
+  "file.import.forcedAlignerProgress": "A alinhar... janela {0} de {1}, {2} de {3} linhas",
+  "file.import.forcedAlignerSetupIntro": "Um alinhador forçado compara o texto existente da legenda com o áudio, sem o transcrever primeiro. Os vídeos longos são alinhados por segmentos, pelo que qualquer duração é suportada.",
+  "file.import.forcedAlignerSetupTitle": "Alinhar tempos através do alinhador forçado",
+  "file.pickMp4TrackX": "Selecionar faixa MP4 - {0}",
+  "file.pickTransportStreamTrackX": "Selecionar faixa do fluxo de transporte - {0}",
+  "file.propertiesDCinema.zPositionHelp": "Os números positivos afastam o texto, os negativos aproximam-no; se a posição Z for zero, é 2D",
+  "file.propertyDefaultRegion": "Região predefinida",
+  "file.propertyDefaultStyle": "Estilo predefinido",
+  "file.propertyDropMode": "Modo drop",
+  "file.propertyFrameRateMultiplier": "Multiplicador da taxa de fotogramas",
+  "file.statistics.againstCurrentProfile": "face ao perfil atual",
+  "file.statistics.cpsAboveOptimalX": "Acima do valor ideal de carateres/seg. ({0:0.##})"
+}
