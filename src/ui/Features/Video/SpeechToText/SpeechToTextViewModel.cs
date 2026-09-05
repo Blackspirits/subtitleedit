@@ -4511,7 +4511,13 @@ public partial class SpeechToTextViewModel : ObservableObject
                 ? OpenAiCompatibleSttAudioFormat
                 : effectiveEngine is OpenRouterSttEngine && OpenRouterSttService.RequiresWavAudio(OpenRouterSttModel)
                     ? "wav"
-                    : "mp3")
+                    // Google Cloud uploads to a Cloud Storage bucket rather than through a
+                    // request body, so OpenAI's 25 MB limit (the reason the other online
+                    // engines compress to ~32 kbit/s) does not apply. Send it lossless: an
+                    // 18 minute chunk is about 20 MB as flac, which is nothing for a bucket.
+                    : effectiveEngine is GoogleCloudSttEngine
+                        ? "flac"
+                        : "mp3")
             : "wav";
         var extension = OpenAiSttService.GetFileExtensionForFormat(sttAudioFormat);
         // Place the extracted audio in a dedicated per-run subfolder. Engines like
@@ -4843,6 +4849,13 @@ public partial class SpeechToTextViewModel : ObservableObject
         return normalized switch
         {
             "mp3" => "-i \"{0}\" -vn -ar 16000 " + channelArgs + " -c:a libmp3lame -b:a 32k -f mp3 {2} \"{1}\"",
+            // Lossless, and about 40% smaller than the equivalent wav. For engines that
+            // upload to their own storage rather than through a request body there is no
+            // upload cap to design around, so there is nothing to buy by compressing.
+            // "-sample_fmt s16" is not optional: without it ffmpeg encodes 24-bit flac from
+            // an AAC source, which is 78% larger than the 16-bit file and larger than the
+            // raw PCM it replaces (measured on ffmpeg 8.1 and 9.0.1).
+            "flac" => "-i \"{0}\" -vn -ar 16000 " + channelArgs + " -c:a flac -sample_fmt s16 -compression_level 8 -f flac {2} \"{1}\"",
             "m4a" => "-i \"{0}\" -vn -ar 16000 " + channelArgs + " -c:a aac -b:a 32k -f ipod {2} \"{1}\"",
             "webm" => "-i \"{0}\" -vn -ar 16000 " + channelArgs + " -c:a libopus -b:a 28k -f webm {2} \"{1}\"",
             // pcm_s16le is already ffmpeg's default for wav, but spell it out: SE's own peak reader
