@@ -17,28 +17,37 @@ jobs:
         with:
           ref: ${{ github.head_ref }}
 
-      - name: Fix confirmed placeholder regression
+      - name: Apply confirmed QA fixes
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
+
           path = Path('src/ui/Assets/Languages/Portuguese.json')
           data = json.loads(path.read_text(encoding='utf-8-sig'))
-          old = data['main']['xLinesMerged']
-          if old not in ('Linhas combinadas', '{0} linhas combinadas'):
-              raise SystemExit(f'Unexpected main.xLinesMerged value: {old!r}')
+
+          def clean(value):
+              if isinstance(value, dict):
+                  return {k: clean(v) for k, v in value.items()}
+              if isinstance(value, str):
+                  value = value.replace('\u200b', '').replace('\u200c', '').replace('\u200d', '').replace('\ufeff', '')
+                  value = value.replace('Caracteres', 'Carateres').replace('caracteres', 'carateres')
+              return value
+
+          data = clean(data)
           data['main']['xLinesMerged'] = '{0} linhas combinadas'
+          data['video']['textToSpeech']['autoCastReplaceSubtitleQuestion'] = 'Isto substitui a legenda aberta pela transcrição do vídeo. Continuar?'
           path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
           PY
           if ! git diff --quiet -- src/ui/Assets/Languages/Portuguese.json; then
             git config user.name 'BlackSpirits'
             git config user.email 'blackspirits@gmail.com'
             git add src/ui/Assets/Languages/Portuguese.json
-            git commit -m 'Fix Portuguese merged-lines placeholder'
+            git commit -m 'Normalize Portuguese translation QA findings'
             git push origin HEAD:${{ github.head_ref }}
           fi
 
-      - name: Validate pt-PT structure, placeholders, and terminology
+      - name: Validate pt-PT against canonical English
         run: |
           python - <<'PY'
           import json
@@ -72,19 +81,33 @@ jobs:
           invis = re.compile('[\u200b\u200c\u200d\ufeff]')
           invisible=[(p,repr(v)) for p,v in pt_l.items() if p not in meta and invis.search(v)]
 
-          hard = re.compile(r'\b(arquivo|arquivos|mouse|tela|telas|salvar|salvando|baixar|usuário|usuários|usuária|usuárias|aplicativo|aplicativos|caractere|caracteres|dublagem|gerenciador|gerenciadores|você|vocês|aceitos|aceitas|européia|planilha|planilhas)\b', re.I)
+          hard = re.compile(r'\b(arquivo|arquivos|mouse|tela|telas|salvar|salvando|baixar|baixado|baixada|baixados|baixadas|usuário|usuários|usuária|usuárias|aplicativo|aplicativos|dublagem|gerenciador|gerenciadores|você|vocês|aceitos|aceitas|européia|planilha|planilhas|mesclar|mesclado|mesclada|mesclados|mescladas|pular|excluir|seção|seções|gênero|porcentagem|porcentagens)\b', re.I)
           lexical=[(p,v) for p,v in pt_l.items() if p not in meta and hard.search(v)]
 
           semantic=[]
+          checks = [
+              (r'\bfonts?\b', r'\bfontes?\b', 'font->fonte'),
+              (r'\bframes?\b', r'\bquadros?\b', 'frame->quadro'),
+              (r'\bmerge(?:d|s|ing)?\b', r'\bmescl\w*\b', 'merge->mesclar'),
+              (r'\bpreview\b', r'\bprévia\b', 'preview->prévia'),
+              (r'\bdefault\b', r'\bpadr(?:ão|ões)\b', 'default->padrão'),
+              (r'\bpress\b', r'\bpression\w*\b', 'press->pressionar'),
+              (r'\bsav(?:e|ed|ing)\b', r'\bsalv\w*\b', 'save->salvar'),
+              (r'\bdownload(?:ed|ing|s)?\b', r'\bbaix\w*\b', 'download->baixar'),
+              (r'\bmanager\b', r'\bgerenciador\w*\b', 'manager->gerenciador'),
+              (r'\bsettings?\b', r'\bconfiguraç(?:ão|ões)\b', 'settings->configurações'),
+              (r'\bengine\b', r'\bmecanismo\w*\b', 'engine->mecanismo'),
+              (r'\brequests?\b', r'\bsolicitaç(?:ão|ões)\b', 'request->solicitação'),
+              (r'\btype\b', r'\bdigite\b', 'type->digite'),
+          ]
           for p,e in en_l.items():
               if p in meta or p not in pt_l: continue
               v=pt_l[p]
-              if re.search(r'\bfonts?\b', e, re.I) and re.search(r'\bfontes?\b', v, re.I):
-                  semantic.append((p,'font->fonte',e,v))
-              if re.search(r'\bframes?\b', e, re.I) and re.search(r'\bquadros?\b', v, re.I):
-                  semantic.append((p,'frame->quadro',e,v))
               if re.search(r'\bplayer\b', v, re.I):
                   semantic.append((p,'player',e,v))
+              for en_pat, pt_pat, label in checks:
+                  if re.search(en_pat, e, re.I) and re.search(pt_pat, v, re.I):
+                      semantic.append((p,label,e,v))
 
           print(f'MISSING={len(missing)} EXTRA={len(extra)}')
           print(f'PLACEHOLDER_ERRORS={len(ph_errors)}')
