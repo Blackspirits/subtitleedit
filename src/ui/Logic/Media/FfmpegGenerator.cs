@@ -329,7 +329,7 @@ public class FfmpegGenerator
 
     private static Process GetFFmpegProcess(string imageFileName, string outputFileName, int videoWidth, int videoHeight, int seconds, decimal frameRate, bool addTimeCode = false, string addTimeColor = "white")
     {
-        var drawText = MakeDrawText(addTimeCode, frameRate, addTimeColor);
+        var drawText = MakeDrawText(addTimeCode, frameRate, addTimeColor, videoHeight);
 
         return new Process
         {
@@ -357,7 +357,7 @@ public class FfmpegGenerator
 
         var htmlColor = $"#{(color.R.ToString("X2") + color.G.ToString("X2") + color.B.ToString("X2")).ToUpperInvariant()}";
 
-        var drawText = MakeDrawText(addTimeCode, frameRate, addTimeColor);
+        var drawText = MakeDrawText(addTimeCode, frameRate, addTimeColor, videoHeight);
 
         return new Process
         {
@@ -371,12 +371,15 @@ public class FfmpegGenerator
         };
     }
 
-    private static string MakeDrawText(bool addTimeCode, decimal frameRate, string addTimeColor)
+    private static string MakeDrawText(bool addTimeCode, decimal frameRate, string addTimeColor, int videoHeight)
     {
         var drawText = string.Empty;
         if (addTimeCode)
         {
-            drawText = $" -vf \"drawtext=timecode='00\\:00\\:00\\:00':r={frameRate.ToString(CultureInfo.InvariantCulture)}:x=10:y=10:fontsize=34:fontcolor={addTimeColor}\"";
+            // Scale with the video height (1080p -> 60 px); a fixed 34 px was tiny at HD sizes.
+            var fontSize = Math.Max(34, videoHeight / 18);
+            var boxColor = addTimeColor == "black" ? "white@0.5" : "black@0.5";
+            drawText = $" -vf \"drawtext=timecode='00\\:00\\:00\\:00':r={frameRate.ToString(CultureInfo.InvariantCulture)}:x=10:y=10:fontsize={fontSize}:fontcolor={addTimeColor}:box=1:boxcolor={boxColor}:boxborderw={Math.Max(4, fontSize / 8)}\"";
         }
 
         return drawText;
