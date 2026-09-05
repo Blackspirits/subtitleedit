@@ -103,7 +103,11 @@ public class GoogleCloudSttService : ISttTranscriber
         try
         {
             var projectId = ReadProjectId(_settings.KeyFile);
-            _credential = (await GoogleCredential.FromFileAsync(_settings.KeyFile, ct)).CreateScoped(Scope);
+            // The key file is a service account key (ReadProjectId reads its project_id), so
+            // ask for that type explicitly. The untyped GoogleCredential.FromFileAsync is
+            // deprecated because it will build whatever credential type the file declares.
+            var serviceAccount = await CredentialFactory.FromFileAsync<ServiceAccountCredential>(_settings.KeyFile, ct);
+            _credential = serviceAccount.ToGoogleCredential().CreateScoped(Scope);
 
             var bucket = string.IsNullOrWhiteSpace(_settings.BucketName) ? DeriveBucketName(projectId) : _settings.BucketName.Trim();
             await EnsureBucketAsync(projectId, bucket, ct);
@@ -178,8 +182,9 @@ public class GoogleCloudSttService : ISttTranscriber
             var json = await PollAsync(operationName, ct);
             var tail = ParseResponse(json, _settings.Logger);
 
+            var merged = response.Segments ??= new List<OpenAiCompatibleSegment>();
             var text = new StringBuilder(response.Text ?? string.Empty);
-            foreach (var segment in tail.Segments)
+            foreach (var segment in tail.Segments ?? new List<OpenAiCompatibleSegment>())
             {
                 // The tail's timings restart at zero, so they need the resume point back.
                 var start = segment.Start + resumeAt;
@@ -188,7 +193,7 @@ public class GoogleCloudSttService : ISttTranscriber
                     continue; // Overlap with what the first pass already produced.
                 }
 
-                segment.Id = response.Segments.Count;
+                segment.Id = merged.Count;
                 segment.Start = start;
                 segment.End = segment.End + resumeAt;
                 if (segment.Words != null)
@@ -200,13 +205,13 @@ public class GoogleCloudSttService : ISttTranscriber
                     }
                 }
 
-                response.Segments.Add(segment);
+                merged.Add(segment);
                 text.Append(' ').Append(segment.Text);
             }
 
             response.Text = text.ToString().Trim();
             _settings.Logger?.Invoke(
-                $"Google Cloud: recovery added {response.Segments.Count} segments in total, now covering to {(response.Segments.Count > 0 ? response.Segments[^1].End : 0):0.#} s");
+                $"Google Cloud: recovery added {merged.Count} segments in total, now covering to {(merged.Count > 0 ? merged[^1].End : 0):0.#} s");
             return response;
         }
         finally
