@@ -226,6 +226,58 @@ public class TextBoxTextDragDropTests
     }
 
     [AvaloniaFact]
+    public void DragOver_ShowsTheDropTargetBar_UntilTheDragLeavesOrDrops()
+    {
+        var (window, textBox) = Show("hello world");
+        try
+        {
+            TextBoxTextDragDrop.SetDragSourceForTest(null, 0, 0);
+            var point = PointAt(window, textBox, 5);
+
+            window.DragDrop(point, RawDragEventType.DragOver, Text("brave"), DragDropEffects.Copy, RawInputModifiers.None);
+            Assert.True(TextBoxTextDragDrop.IsIndicatorShownForTest(textBox));
+
+            window.DragDrop(point, RawDragEventType.DragLeave, Text("brave"), DragDropEffects.Copy, RawInputModifiers.None);
+            Assert.False(TextBoxTextDragDrop.IsIndicatorShownForTest(textBox));
+
+            window.DragDrop(point, RawDragEventType.DragOver, Text("brave"), DragDropEffects.Copy, RawInputModifiers.None);
+            Assert.True(TextBoxTextDragDrop.IsIndicatorShownForTest(textBox));
+
+            window.DragDrop(point, RawDragEventType.Drop, Text("brave"), DragDropEffects.Copy, RawInputModifiers.None);
+            Dispatcher.UIThread.RunJobs();
+            Assert.False(TextBoxTextDragDrop.IsIndicatorShownForTest(textBox));
+            Assert.Equal("hello brave world", textBox.Text);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void DragOver_TheDraggedRangeItself_RefusesTheDropAndShowsNoBar()
+    {
+        var (window, textBox) = Show("hello brave world");
+        try
+        {
+            TextBoxTextDragDrop.SetDragSourceForTest(textBox, 6, 5);
+            var inside = PointAt(window, textBox, 8);
+
+            window.DragDrop(inside, RawDragEventType.DragOver, Text("brave"), DragDropEffects.Copy | DragDropEffects.Move, RawInputModifiers.None);
+            Assert.False(TextBoxTextDragDrop.IsIndicatorShownForTest(textBox));
+
+            var outside = PointAt(window, textBox, 2);
+            window.DragDrop(outside, RawDragEventType.DragOver, Text("brave"), DragDropEffects.Copy | DragDropEffects.Move, RawInputModifiers.None);
+            Assert.True(TextBoxTextDragDrop.IsIndicatorShownForTest(textBox));
+        }
+        finally
+        {
+            TextBoxTextDragDrop.SetDragSourceForTest(null, 0, 0);
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void DropWithinTheSameBox_LiftingAWordBeforePunctuation_LeavesNoStraySpace()
     {
         var (window, textBox) = Show("hello brave." + Environment.NewLine + "world");
