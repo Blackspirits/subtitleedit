@@ -1,0 +1,133 @@
+name: UPL pt-PT rc4 sync
+
+on:
+  pull_request:
+    branches:
+      - upl/upstream-main-05cd5a7
+
+permissions:
+  contents: write
+
+jobs:
+  sync-and-qa:
+    if: github.head_ref == 'translation/pt-pt-5.2.0-rc4-work'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.head_ref }}
+
+      - name: Sync new English source strings to pt-PT
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path('src/ui/Assets/Languages/Portuguese.json')
+          data = json.loads(path.read_text(encoding='utf-8-sig'))
+          data['version'] = 'v5.2.0-rc4'
+
+          wf = data['main']['waveform']
+          wf.update({
+              'guessStartNoLineSelected': 'Estimar início: nenhuma linha selecionada',
+              'guessStartTimeCodesLocked': 'Estimar início: os códigos de tempo estão bloqueados',
+              'guessStartNoWaveform': 'Estimar início: sem forma de onda',
+              'guessStartNoRoomBeforePreviousLineX': 'Estimar início: não há espaço entre a linha {0} e a linha anterior',
+              'guessStartLineXAlreadyAtBoundary': 'Estimar início: a linha {0} já começa onde a fala começa',
+              'guessStartNoSilenceFoundNearLineX': 'Estimar início: não foi encontrado silêncio junto à linha {0}',
+              'guessStartMovedLineXByYMs': 'Estimar início: o início da linha {0} foi deslocado {1} ms',
+              'guessEndNoLineSelected': 'Estimar fim: nenhuma linha selecionada',
+              'guessEndTimeCodesLocked': 'Estimar fim: os códigos de tempo estão bloqueados',
+              'guessEndNoWaveform': 'Estimar fim: sem forma de onda',
+              'guessEndNoRoomBeforeNextLineX': 'Estimar fim: não há espaço entre a linha {0} e a linha seguinte',
+              'guessEndLineXAlreadyAtBoundary': 'Estimar fim: a linha {0} já termina onde a fala termina',
+              'guessEndNoSilenceFoundNearLineX': 'Estimar fim: não foi encontrado silêncio junto à linha {0}',
+              'guessEndMovedLineXByYMs': 'Estimar fim: o fim da linha {0} foi deslocado {1} ms',
+          })
+
+          def set_unique(obj, key, value):
+              hits = []
+              def walk(node):
+                  if isinstance(node, dict):
+                      if key in node:
+                          hits.append(node)
+                      for v in node.values():
+                          walk(v)
+                  elif isinstance(node, list):
+                      for v in node:
+                          walk(v)
+              walk(obj)
+              if len(hits) != 1:
+                  raise SystemExit(f'{key}: expected exactly one occurrence, found {len(hits)}')
+              hits[0][key] = value
+
+          set_unique(data, 'guessTimeCodes', 'Estimar códigos de tempo')
+          set_unique(data, 'guessTimeCodesDotDotDot', 'Estimar códigos de tempo...')
+          set_unique(data, 'waveformGuessStartOffsetMs', 'Estimar tempo inicial a partir da forma de onda: antecipar o início em (ms)')
+          set_unique(data, 'waveformGuessEndOffsetMs', 'Estimar tempo final a partir da forma de onda: atrasar o fim em (ms)')
+          set_unique(data, 'waveformSnapToShotChangeSameShotEndMaxSeconds', 'Ajustar para a mudança de cena mais próxima: distância final máxima quando o início e o fim partilham um corte (segundos)')
+          set_unique(data, 'guessTimeCodesScanBlockSize', 'Tamanho do bloco de varrimento (ms):')
+
+          path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          PY
+
+          if ! git diff --quiet -- src/ui/Assets/Languages/Portuguese.json; then
+            git config user.name 'BlackSpirits'
+            git config user.email 'blackspirits@gmail.com'
+            git add src/ui/Assets/Languages/Portuguese.json
+            git commit -m 'Sync Portuguese translation with rc4 English source'
+            git push origin HEAD:${{ github.head_ref }}
+          fi
+
+      - name: Validate against canonical English
+        run: |
+          python - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          folder = Path('src/ui/Assets/Languages')
+          en = json.loads((folder/'English.json').read_text(encoding='utf-8-sig'))
+          pt = json.loads((folder/'Portuguese.json').read_text(encoding='utf-8-sig'))
+          meta = {'title','version','translatedBy','cultureName'}
+
+          def leaves(obj, prefix=''):
+              out = {}
+              for k, v in obj.items():
+                  p = f'{prefix}.{k}' if prefix else k
+                  if isinstance(v, str): out[p] = v
+                  elif isinstance(v, dict): out.update(leaves(v, p))
+              return out
+
+          en_l, pt_l = leaves(en), leaves(pt)
+          missing = sorted(set(en_l) - set(pt_l) - meta)
+          extra = sorted(set(pt_l) - set(en_l) - meta)
+          ph = re.compile(r'\{(\d+)(?::[^}]*)?\}')
+          ph_errors = []
+          for p, e in en_l.items():
+              if p in meta or p not in pt_l:
+                  continue
+              a, b = sorted(ph.findall(e)), sorted(ph.findall(pt_l[p]))
+              if a != b:
+                  ph_errors.append((p, a, b, e, pt_l[p]))
+
+          invisible_re = re.compile('[\u200b\u200c\u200d\ufeff]')
+          invisible = [(p, repr(v)) for p, v in pt_l.items() if p not in meta and invisible_re.search(v)]
+          hard_re = re.compile(r'\b(arquivo|arquivos|tela|telas|salvar|salvando|baixar|baixado|baixada|baixados|baixadas|usuário|usuários|usuária|usuárias|aplicativo|aplicativos|dublagem|gerenciador|gerenciadores|você|vocês|européia|planilha|planilhas|mesclar|mesclado|mesclada|mesclados|mescladas|pular|excluir|seção|seções|gênero|porcentagem|porcentagens|compartilh\w*|varredura|término)\b', re.I)
+          lexical = [(p, v) for p, v in pt_l.items() if p not in meta and hard_re.search(v)]
+
+          print(f'MISSING={len(missing)} EXTRA={len(extra)}')
+          print(f'PLACEHOLDER_ERRORS={len(ph_errors)}')
+          print(f'INVISIBLE_ERRORS={len(invisible)}')
+          print(f'PTBR_OR_INCONSISTENT_MARKERS={len(lexical)}')
+          for x in missing: print('MISSING', x, sep='\t')
+          for x in extra: print('EXTRA', x, sep='\t')
+          for x in ph_errors: print('PH', *x, sep='\t')
+          for x in invisible: print('INVISIBLE', *x, sep='\t')
+          for x in lexical: print('LEX', *x, sep='\t')
+
+          if pt.get('version') != en.get('version'):
+              raise SystemExit(f"version mismatch: pt={pt.get('version')} en={en.get('version')}")
+          if missing or extra or ph_errors or invisible or lexical:
+              raise SystemExit('pt-PT rc4 QA findings remain')
+          PY
