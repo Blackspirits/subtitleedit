@@ -73,7 +73,7 @@ public class AssaStylePickerWindow : Window
             Header = Se.Language.General.Usages,
             CellTheme = UiUtil.TableViewCellTheme,
             HeaderTheme = UiUtil.TableViewColumnHeaderTheme,
-            Binding = new Binding(nameof(StyleDisplay.FontSize)),
+            Binding = new Binding(nameof(StyleDisplay.UsageCount)),
             Width = new GridLength(90),
         };
         usagesColumn.Bind(SeTableViewColumn.IsVisibleProperty, new Binding(nameof(vm.ShowUsageCount))
