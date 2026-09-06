@@ -325,6 +325,222 @@ public class Se4GuessStartAndUnderlineTests : IDisposable
         Assert.Equal(4600, vm.Subtitles[0].EndTime.TotalMilliseconds, 0);
     }
 
+    /// <summary>
+    /// #14596: a start cue an ordinary threshold cannot see past. The bed has a loud sample right
+    /// after the cue, so the lowest thresholds find "silence" that ends where the cue already is
+    /// and SE 4 gave up there; a threshold a few steps up sees through the spike to the onset
+    /// 160 ms later. The sweep now keeps climbing past a boundary that matches the cue.
+    /// </summary>
+    [AvaloniaFact]
+    public void GuessStartClimbsPastASpikeNextToTheCue()
+    {
+        Se.Settings.General.LockTimeCodes = false;
+        Se.Settings.Waveform.GuessStartOffsetMs = 0;
+
+        const int cueSample = 232;
+        var (window, vm) = CreateMainViewModel();
+        vm.Subtitles.Add(new SubtitleLineViewModel(new Paragraph("Hello", cueSample * 10, 4600), null!) { Number = 1 });
+        Dispatcher.UIThread.RunJobs();
+
+        var av = vm.AudioVisualizer!;
+        av.WavePeaks = BuildPeaks(10, i =>
+            i >= 250 && i < 400 ? 20000 : // the speech
+            i >= 800 && i < 900 ? 32000 : // loud elsewhere, so the bed is a small fraction of the peak
+            (i - cueSample - 2) % 15 == 0 ? 3800 : 1000); // a spiky bed with a spike 20 ms after the cue
+        Select(vm, vm.Subtitles[0]);
+        window.UpdateLayout();
+        Dispatcher.UIThread.RunJobs();
+
+        vm.WaveformGuessStartCommand.Execute(null);
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.InRange(vm.Subtitles[0].StartTime.TotalMilliseconds, 2400, 2500);
+        Assert.Equal("Guess start: line 1 start moved +160 ms", vm.StatusTextLeft);
+    }
+
+    /// <summary>
+    /// The flip side of climbing past a matching boundary (#14596): on a soft onset every higher
+    /// threshold finds the edge a sample later, and taking that would walk the cue into the
+    /// speech 10 ms per key press. Repeated presses must settle, not creep.
+    /// </summary>
+    [AvaloniaFact]
+    public void GuessStartDoesNotCreepIntoASoftOnset()
+    {
+        Se.Settings.General.LockTimeCodes = false;
+        Se.Settings.Waveform.GuessStartOffsetMs = 0;
+
+        var (window, vm) = CreateMainViewModel();
+        vm.Subtitles.Add(new SubtitleLineViewModel(new Paragraph("Hello", 2500, 4600), null!) { Number = 1 });
+        Dispatcher.UIThread.RunJobs();
+
+        var av = vm.AudioVisualizer!;
+        av.WavePeaks = BuildPeaks(10, i =>
+            i < 250 ? 300 :
+            i < 280 ? 300 + (20000 - 300) * (i - 250) / 30 : // a 300 ms ramp up to full voice
+            i < 400 ? 20000 : 300);
+        Select(vm, vm.Subtitles[0]);
+        window.UpdateLayout();
+        Dispatcher.UIThread.RunJobs();
+
+        vm.WaveformGuessStartCommand.Execute(null);
+        var first = vm.Subtitles[0].StartTime.TotalMilliseconds;
+        Assert.InRange(first, 2490, 2530);
+
+        for (var press = 0; press < 3; press++)
+        {
+            vm.WaveformGuessStartCommand.Execute(null);
+            Assert.Equal(first, vm.Subtitles[0].StartTime.TotalMilliseconds, 0);
+        }
+
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("Guess start: line 1 already starts where the speech begins", vm.StatusTextLeft);
+    }
+
+    /// <summary>
+    /// #14596: an end cue left hanging well past the speech is what "guess end" is for, but the
+    /// search only looked 1 s back, so a cue more than that late never moved. The end may now move
+    /// back as far as the line's start allows.
+    /// </summary>
+    [AvaloniaTheory]
+    [InlineData(5500)] // 1.5 s past the speech
+    [InlineData(5200)] // 1.2 s
+    [InlineData(4900)] // 0.9 s, within the old reach
+    public void GuessEndReachesBackToSpeechFromAnEndCueLeftLong(int endMs)
+    {
+        Se.Settings.General.LockTimeCodes = false;
+        Se.Settings.Waveform.GuessEndOffsetMs = 0;
+
+        var (window, vm) = CreateMainViewModel();
+        vm.Subtitles.Add(new SubtitleLineViewModel(new Paragraph("Hello", 2500, endMs), null!) { Number = 1 });
+        Dispatcher.UIThread.RunJobs();
+
+        var av = vm.AudioVisualizer!;
+        av.WavePeaks = MakePeaks(sampleRate: 100, seconds: 10, speechFromSeconds: 2.5, speechToSeconds: 4.0);
+        Select(vm, vm.Subtitles[0]);
+        window.UpdateLayout();
+        Dispatcher.UIThread.RunJobs();
+
+        vm.WaveformGuessEndCommand.Execute(null);
+
+        Assert.InRange(vm.Subtitles[0].EndTime.TotalMilliseconds, 4000, 4100);
+    }
+
+    /// <summary>
+    /// The start-side mirror (#14596): SE 4 looked 0.8 s ahead, so a start cue more than that
+    /// early stayed put. The start may now move forward as far as the line's end allows.
+    /// </summary>
+    [AvaloniaTheory]
+    [InlineData(1000)] // 1.5 s before the speech
+    [InlineData(1300)] // 1.2 s
+    [InlineData(1700)] // 0.8 s, within the old reach
+    public void GuessStartReachesForwardToSpeechFromAStartCueLeftEarly(int startMs)
+    {
+        Se.Settings.General.LockTimeCodes = false;
+        Se.Settings.Waveform.GuessStartOffsetMs = 0;
+
+        var (window, vm) = CreateMainViewModel();
+        vm.Subtitles.Add(new SubtitleLineViewModel(new Paragraph("Hello", startMs, 4000), null!) { Number = 1 });
+        Dispatcher.UIThread.RunJobs();
+
+        var av = vm.AudioVisualizer!;
+        av.WavePeaks = MakePeaks(sampleRate: 100, seconds: 10, speechFromSeconds: 2.5, speechToSeconds: 4.0);
+        Select(vm, vm.Subtitles[0]);
+        window.UpdateLayout();
+        Dispatcher.UIThread.RunJobs();
+
+        vm.WaveformGuessStartCommand.Execute(null);
+
+        Assert.InRange(vm.Subtitles[0].StartTime.TotalMilliseconds, 2400, 2500);
+    }
+
+    /// <summary>
+    /// #14596: a start cue that sits inside continuous speech. The noise floor used to be read
+    /// over 0.4 s around the cue, which here is all speech, so the sweep started high enough for
+    /// a soft syllable 50 ms before the cue to count as the silence and the cue snapped to it.
+    /// The floor is now read over the whole stretch the start can move back in, and the cue goes
+    /// to the real onset 0.9 s back.
+    /// </summary>
+    [AvaloniaFact]
+    public void GuessStartReadsTheNoiseFloorBeyondContinuousSpeech()
+    {
+        Se.Settings.General.LockTimeCodes = false;
+        Se.Settings.Waveform.GuessStartOffsetMs = 0;
+
+        var (window, vm) = CreateMainViewModel();
+        vm.Subtitles.Add(new SubtitleLineViewModel(new Paragraph("Hello", 2900, 4000), null!) { Number = 1 });
+        Dispatcher.UIThread.RunJobs();
+
+        var av = vm.AudioVisualizer!;
+        av.WavePeaks = BuildPeaks(10, i =>
+            i < 200 || i >= 400 ? 200 : // the floor
+            i >= 270 && i < 285 ? 1500 : 8000); // speech from 2.0 to 4.0 with a soft syllable at 2.7
+        Select(vm, vm.Subtitles[0]);
+        window.UpdateLayout();
+        Dispatcher.UIThread.RunJobs();
+
+        vm.WaveformGuessStartCommand.Execute(null);
+
+        Assert.InRange(vm.Subtitles[0].StartTime.TotalMilliseconds, 1900, 2000);
+    }
+
+    /// <summary>
+    /// #14596: every way the commands can decline used to be silent, so "no silence found" and
+    /// "the shortcut never fired" looked the same (#14472, #14555). Each outcome now shows in the
+    /// status bar.
+    /// </summary>
+    [AvaloniaFact]
+    public void GuessStartAndEndReportWhyNothingMoved()
+    {
+        Se.Settings.General.LockTimeCodes = false;
+
+        var (window, vm) = CreateMainViewModel();
+        vm.Subtitles.Add(new SubtitleLineViewModel(new Paragraph("Hello", 2200, 4600), null!) { Number = 1 });
+        Dispatcher.UIThread.RunJobs();
+        Select(vm, vm.Subtitles[0]);
+
+        vm.WaveformGuessStartCommand.Execute(null);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("Guess start: no waveform", vm.StatusTextLeft);
+
+        vm.WaveformGuessEndCommand.Execute(null);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("Guess end: no waveform", vm.StatusTextLeft);
+
+        var av = vm.AudioVisualizer!;
+        av.WavePeaks = BuildPeaks(10, i => i % 2 == 0 ? 450 : 550); // noise only, nothing to find
+        window.UpdateLayout();
+        Dispatcher.UIThread.RunJobs();
+
+        vm.WaveformGuessStartCommand.Execute(null);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("Guess start: no silence found near line 1", vm.StatusTextLeft);
+
+        vm.WaveformGuessEndCommand.Execute(null);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("Guess end: no silence found near line 1", vm.StatusTextLeft);
+
+        vm.LockTimeCodes = true;
+        vm.WaveformGuessStartCommand.Execute(null);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("Guess start: time codes are locked", vm.StatusTextLeft);
+        vm.LockTimeCodes = false;
+
+        Assert.Equal(2200, vm.Subtitles[0].StartTime.TotalMilliseconds, 0);
+        Assert.Equal(4600, vm.Subtitles[0].EndTime.TotalMilliseconds, 0);
+    }
+
+    private static WavePeakData2 BuildPeaks(int seconds, Func<int, int> level)
+    {
+        var peaks = new WavePeak2[100 * seconds];
+        for (var i = 0; i < peaks.Length; i++)
+        {
+            var v = (short)level(i);
+            peaks[i] = new WavePeak2(v, (short)-v);
+        }
+
+        return new WavePeakData2(100, peaks);
+    }
+
     private static WavePeakData2 MakeQuietPeaks(short speechLevel, short floorLevel, bool loudElsewhere)
     {
         const int sampleRate = 100;
