@@ -5154,6 +5154,41 @@ public partial class MainViewModel :
         }
     }
 
+    /// <summary>
+    /// Runs the plain text importer pre-filled with <paramref name="fileName"/> and, like
+    /// SubtitleOpen does for real subtitles, pairs it with a matching media file next to it
+    /// (unsynced lyrics next to their .flac/.mp3, issue #14605).
+    /// </summary>
+    private async Task ImportPlainTextFromFile(string fileName, bool skipLoadVideo)
+    {
+        if (Window == null)
+        {
+            return;
+        }
+
+        var result = await ShowDialogAsync<ImportPlainTextWindow, ImportPlainTextViewModel>(vm => vm.Initialize(_subtitle, _videoFileName, fileName));
+        if (!result.OkPressed || result.Subtitles.Count == 0)
+        {
+            return;
+        }
+
+        _subtitleFileName = string.Empty;
+        ResetSubtitle();
+        foreach (var item in result.Subtitles)
+        {
+            Subtitles.Add(item);
+        }
+
+        Renumber();
+        _updateAudioVisualizer = true;
+
+        if (!skipLoadVideo && string.IsNullOrEmpty(_videoFileName) &&
+            FindVideoFileName.TryFindVideoFileName(fileName, out var videoFileName))
+        {
+            await VideoOpenFile(videoFileName);
+        }
+    }
+
     [RelayCommand]
     private async Task ImportCsvXlsxCustomColumns()
     {
@@ -22308,8 +22343,17 @@ public partial class MainViewModel :
 
             if (subtitle == null)
             {
+                // Offer the plain text importer right here: SE4 users drop unsynced .txt lyrics
+                // onto the window and expect them in the grid without a trip through the
+                // File menu (issue #14605).
                 var message = Se.Language.General.UnknownSubtitleFormat;
-                await MessageBox.Show(Window!, Se.Language.General.Error, message, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                var answer = await MessageBox.Show(Window!, Se.Language.General.Error, message, MessageBoxButtons.OK, MessageBoxIcon.Error,
+                    custom1: Se.Language.File.Import.TitleImportPlainText);
+                if (answer == MessageBoxResult.Custom1)
+                {
+                    await ImportPlainTextFromFile(fileName, skipLoadVideo);
+                }
+
                 return;
             }
 
