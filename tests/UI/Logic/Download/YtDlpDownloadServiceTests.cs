@@ -163,6 +163,26 @@ public class YtDlpDownloadServiceTests
     }
 
     [Fact]
+    public async Task VerifyChecksumAsync_PartFile_Mismatch_ThrowsAndDeletesFile()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "VerifyPartMismatch_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, "yt-dlp.exe.part");
+        await File.WriteAllTextAsync(path, "this is not really yt-dlp", TestContext.Current.CancellationToken);
+        try
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                YtDlpDownloadService.VerifyChecksumAsync(path, YtDlpDownloadService.CurrentVersion, TestContext.Current.CancellationToken));
+
+            Assert.False(File.Exists(path), "A downloaded .part binary that fails verification must be deleted.");
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task VerifyChecksumAsync_UnknownAsset_IsNoOp_AndKeepsFile()
     {
         var dir = Path.Combine(Path.GetTempPath(), "VerifyUnknownAsset_" + Guid.NewGuid().ToString("N"));
