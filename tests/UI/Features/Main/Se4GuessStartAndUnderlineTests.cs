@@ -26,12 +26,16 @@ public class Se4GuessStartAndUnderlineTests : IDisposable
     private readonly bool _timeCodesLocked = Se.Settings.General.LockTimeCodes;
     private readonly int _guessStartOffsetMs = Se.Settings.Waveform.GuessStartOffsetMs;
     private readonly int _guessEndOffsetMs = Se.Settings.Waveform.GuessEndOffsetMs;
+    private readonly double _maxCps = Se.Settings.General.SubtitleMaximumCharactersPerSeconds;
+    private readonly int _minDisplayMs = Se.Settings.General.SubtitleMinimumDisplayMilliseconds;
 
     public void Dispose()
     {
         Se.Settings.General.LockTimeCodes = _timeCodesLocked;
         Se.Settings.Waveform.GuessStartOffsetMs = _guessStartOffsetMs;
         Se.Settings.Waveform.GuessEndOffsetMs = _guessEndOffsetMs;
+        Se.Settings.General.SubtitleMaximumCharactersPerSeconds = _maxCps;
+        Se.Settings.General.SubtitleMinimumDisplayMilliseconds = _minDisplayMs;
         foreach (var window in _windows)
         {
             window.Close();
@@ -451,6 +455,46 @@ public class Se4GuessStartAndUnderlineTests : IDisposable
         vm.WaveformGuessStartCommand.Execute(null);
 
         Assert.InRange(vm.Subtitles[0].StartTime.TotalMilliseconds, 2400, 2500);
+    }
+
+    /// <summary>
+    /// #14604: a start cue left early on a line whose text is long. Moving the start all the way
+    /// to the speech would push the line over the maximum CPS (or under the minimum duration), and
+    /// SE 4 then shifted the whole line instead, end included, so "guess start" on long text moved
+    /// the line rather than trimmed it. The start now stops at the rule's floor and the end stays.
+    /// A second press finds the same floor and leaves the line alone.
+    /// </summary>
+    [AvaloniaTheory]
+    [InlineData(60, 25.0, 1000, 1000, 1600)] // 60 chars at 25 CPS need 2.4 s: start stops at 1.6 s
+    [InlineData(2, 25.0, 1600, 2000, 2400)] // minimum duration 1.6 s: start stops at 2.4 s
+    [InlineData(2, 25.0, 1000, 1000, 2450)] // no rule in the way: start goes to the speech
+    public void GuessStartStopsAtTheCpsAndMinimumDurationFloorInsteadOfMovingTheLine(int characters, double maxCps, int minDisplayMs, int startMs, int expectedStartMs)
+    {
+        Se.Settings.General.LockTimeCodes = false;
+        Se.Settings.Waveform.GuessStartOffsetMs = 0;
+        Se.Settings.General.SubtitleMaximumCharactersPerSeconds = maxCps;
+        Se.Settings.General.SubtitleMinimumDisplayMilliseconds = minDisplayMs;
+
+        var (window, vm) = CreateMainViewModel();
+        vm.Subtitles.Add(new SubtitleLineViewModel(new Paragraph(new string('x', characters), startMs, 4000), null!) { Number = 1 });
+        Dispatcher.UIThread.RunJobs();
+
+        var av = vm.AudioVisualizer!;
+        av.WavePeaks = MakePeaks(sampleRate: 100, seconds: 10, speechFromSeconds: 2.5, speechToSeconds: 4.0);
+        Select(vm, vm.Subtitles[0]);
+        window.UpdateLayout();
+        Dispatcher.UIThread.RunJobs();
+
+        vm.WaveformGuessStartCommand.Execute(null);
+
+        var line = vm.Subtitles[0];
+        Assert.InRange(line.StartTime.TotalMilliseconds, expectedStartMs - 10, expectedStartMs + 50);
+        Assert.Equal(4000, line.EndTime.TotalMilliseconds, 0);
+
+        var startAfterFirstPress = line.StartTime.TotalMilliseconds;
+        vm.WaveformGuessStartCommand.Execute(null);
+        Assert.Equal(startAfterFirstPress, line.StartTime.TotalMilliseconds, 0);
+        Assert.Equal(4000, line.EndTime.TotalMilliseconds, 0);
     }
 
     /// <summary>
