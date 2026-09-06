@@ -62,6 +62,7 @@ public class MainView : ViewBase
             {
                 _vm.OnLoaded();
             };
+            _vm.Window.Closed += (_, _) => _vm.StopBackgroundWork();
 
             // Clipboard-manager compatibility (Ditto, CopyQ, ClipClip, ...) - see the
             // hook for what it intercepts and why (#13822).

@@ -59,6 +59,16 @@ public partial class MultipleReplaceViewModel : ObservableObject
     // compiled cache: see GetRegexError.
     private readonly ConcurrentDictionary<string, string?> _regExErrors;
     private readonly Timer _timerReplace;
+
+    /// <summary>
+    /// The preview debounce (250 ms). Internal so the headless tests, which can only observe the
+    /// preview by waiting for this timer, can shorten it instead of sleeping through it.
+    /// </summary>
+    internal double PreviewIntervalMs
+    {
+        get => _timerReplace.Interval;
+        set => _timerReplace.Interval = value;
+    }
     private readonly object _previewLock = new();
     private volatile bool _dirty;
     private volatile bool _closed;
