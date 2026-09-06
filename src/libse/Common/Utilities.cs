@@ -1822,18 +1822,18 @@ namespace Nikse.SubtitleEdit.Core.Common
                 post.Clear();
                 int i = 0;
                 while (i < s2.Length && PrePostStringsToReverse.Contains(s2[i]) && s2[i] != '{' &&
-                       !s2.Substring(i).StartsWith("<i>", StringComparison.OrdinalIgnoreCase) &&
-                       !s2.Substring(i).StartsWith("<b>", StringComparison.OrdinalIgnoreCase) &&
-                       !s2.Substring(i).StartsWith("<font ", StringComparison.OrdinalIgnoreCase))
+                       !s2.StartsWithAt(i, "<i>", StringComparison.OrdinalIgnoreCase) &&
+                       !s2.StartsWithAt(i, "<b>", StringComparison.OrdinalIgnoreCase) &&
+                       !s2.StartsWithAt(i, "<font ", StringComparison.OrdinalIgnoreCase))
                 {
                     pre.Append(s2[i]);
                     i++;
                 }
                 int j = s2.Length - 1;
                 while (j > i && PrePostStringsToReverse.Contains(s2[j]) && s2[j] != '}' &&
-                       !s2.Substring(0, j + 1).EndsWith("</i>", StringComparison.OrdinalIgnoreCase) &&
-                       !s2.Substring(0, j + 1).EndsWith("</b>", StringComparison.OrdinalIgnoreCase) &&
-                       !s2.Substring(0, j + 1).EndsWith("</font>", StringComparison.OrdinalIgnoreCase))
+                       !s2.EndsWithAt(j + 1, "</i>", StringComparison.OrdinalIgnoreCase) &&
+                       !s2.EndsWithAt(j + 1, "</b>", StringComparison.OrdinalIgnoreCase) &&
+                       !s2.EndsWithAt(j + 1, "</font>", StringComparison.OrdinalIgnoreCase))
                 {
                     post.Append(s2[j]);
                     j--;
