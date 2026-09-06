@@ -312,13 +312,14 @@ public static class TtsVoiceInstaller
             return false;
         }
 
-        // The three audio.cpp engines share this binary. A server started from the old build
+        // The four audio.cpp engines share this binary. A server started from the old build
         // must go before the archive is extracted: on Windows the running exe cannot be
         // overwritten at all, and elsewhere the stale process would keep answering requests
         // (and reject any model family the new build added) until Subtitle Edit restarts.
         IndexTts25AudioCpp.StopServer();
         HiggsTtsAudioCpp.StopServer();
         FishTtsAudioCpp.StopServer();
+        FireRedTts3AudioCpp.StopServer();
 
         var dlResult = await windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(
             window, vm => vm.StartDownloadIndexTts25AudioCppEngine(backend));

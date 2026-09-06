@@ -6,7 +6,7 @@ namespace UITests.Features.Video.TextToSpeech.Engines;
 
 /// <summary>
 /// Per-line voice cloning on the audio.cpp engines (IndexTTS 2.5, Higgs Audio v3, Fish Audio
-/// S2 Pro). Their server takes the reference as a per-request path, so nothing is staged: the
+/// S2 Pro, FireRedTTS3). Their server takes the reference as a per-request path, so nothing is staged: the
 /// voice for a line is the cut clip itself.
 /// </summary>
 /// <remarks>
@@ -21,6 +21,7 @@ public class AudioCppPerLineCloneTests
         yield return new object[] { new IndexTts25AudioCpp() };
         yield return new object[] { new HiggsTtsAudioCpp() };
         yield return new object[] { new FishTtsAudioCpp() };
+        yield return new object[] { new FireRedTts3AudioCpp() };
     }
 
     [Theory]
@@ -57,6 +58,7 @@ public class AudioCppPerLineCloneTests
 
         Assert.NotNull(PerLineVoiceClone.MakeVoiceForClip(new HiggsTtsAudioCpp(), clip));
         Assert.NotNull(PerLineVoiceClone.MakeVoiceForClip(new IndexTts25AudioCpp(), clip));
+        Assert.NotNull(PerLineVoiceClone.MakeVoiceForClip(new FireRedTts3AudioCpp(), clip));
     }
 
     [Theory]
