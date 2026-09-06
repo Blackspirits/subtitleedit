@@ -19,10 +19,14 @@ namespace Nikse.SubtitleEdit.Features.Video.TextToSpeech.AudioCppTtsSettings;
 
 /// <summary>
 /// Everything the shared audio.cpp settings dialog needs to know about one engine. Higgs
-/// Audio v3 and Fish Audio S2 Pro expose no per-request knobs (both auto-handle language and
-/// take their expression from the text itself), so their settings dialogs are the same shape:
-/// runtime status, two model quants, voices, folders. IndexTTS 2.5 keeps its own dialog —
-/// it has emotion and speed controls this one does not.
+/// Audio v3, Fish Audio S2 Pro and FireRedTTS3 expose no per-request knobs (language is either
+/// auto-detected or picked in the main window's combo, and expression comes from the text
+/// itself), so their settings dialogs are the same shape: runtime status, two model quants,
+/// voices, folders. IndexTTS 2.5 keeps its own dialog — it has emotion and speed controls
+/// this one does not.
+///
+/// <see cref="LicenseDefinition"/> is null for weights that need no acceptance (FireRedTTS3
+/// is Apache-2.0); <see cref="IsLicenseAccepted"/> then always returns true.
 /// </summary>
 public sealed record AudioCppTtsSettingsAdapter(
     string EngineName,
@@ -34,7 +38,7 @@ public sealed record AudioCppTtsSettingsAdapter(
     Func<string> GetModelsFolder,
     Func<string> GetVoicesFolder,
     Func<bool> IsLicenseAccepted,
-    ModelLicenseDefinition LicenseDefinition,
+    ModelLicenseDefinition? LicenseDefinition,
     Action<DownloadTtsViewModel, string> StartDownloadModels);
 
 public static class AudioCppTtsSettingsAdapters
@@ -64,6 +68,19 @@ public static class AudioCppTtsSettingsAdapters
         IsLicenseAccepted: FishTtsAudioCpp.IsLicenseAccepted,
         LicenseDefinition: FishTtsAudioCpp.LicenseDefinition,
         StartDownloadModels: (vm, modelKey) => vm.StartDownloadFishTtsAudioCppModels(modelKey));
+
+    public static AudioCppTtsSettingsAdapter FireRedTts3 { get; } = new(
+        EngineName: "FireRedTTS3 (audio.cpp)",
+        Description: new FireRedTts3AudioCpp().Description,
+        ModelKeyDefault: FireRedTts3AudioCpp.ModelKeyQ8_0,
+        ModelKeyAlt: FireRedTts3AudioCpp.ModelKeyOrig,
+        ResolveModelKey: FireRedTts3AudioCpp.ResolveModelKey,
+        AreModelsInstalled: FireRedTts3AudioCpp.AreModelsInstalled,
+        GetModelsFolder: FireRedTts3AudioCpp.GetSetModelsFolder,
+        GetVoicesFolder: FireRedTts3AudioCpp.GetSetVoicesFolder,
+        IsLicenseAccepted: () => true,
+        LicenseDefinition: null,
+        StartDownloadModels: (vm, modelKey) => vm.StartDownloadFireRedTts3AudioCppModels(modelKey));
 }
 
 public partial class AudioCppTtsSettingsViewModel : ObservableObject
@@ -205,10 +222,10 @@ public partial class AudioCppTtsSettingsViewModel : ObservableObject
 
         // Same gate as the install flow: nothing is fetched before the model licence is
         // accepted, including a download started from this dialog.
-        if (!Adapter.IsLicenseAccepted())
+        if (Adapter.LicenseDefinition is { } licenseDefinition && !Adapter.IsLicenseAccepted())
         {
             var licenseResult = await _windowService.ShowDialogAsync<ModelLicenseWindow, ModelLicenseViewModel>(
-                Window, vm => vm.Initialize(Adapter.LicenseDefinition));
+                Window, vm => vm.Initialize(licenseDefinition));
             if (!licenseResult.OkPressed || !Adapter.IsLicenseAccepted())
             {
                 return;

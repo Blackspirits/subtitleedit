@@ -464,6 +464,19 @@ public static class TtsEngineInstaller
                 startDownloadModels: (vm, key) => vm.StartDownloadFishTtsAudioCppModels(key));
         }
 
+        if (engine is FireRedTts3AudioCpp)
+        {
+            // Apache-2.0 weights: no licence gate, otherwise the same runtime + model flow.
+            return await EnsureAudioCppEngineWithLicense(
+                window, windowService, refreshVoices,
+                engineDisplayName: "FireRedTTS3",
+                licenseDefinition: null,
+                isLicenseAccepted: () => true,
+                modelKey: FireRedTts3AudioCpp.ResolveModelKey(model),
+                areModelsInstalled: FireRedTts3AudioCpp.AreModelsInstalled,
+                startDownloadModels: (vm, key) => vm.StartDownloadFireRedTts3AudioCppModels(key));
+        }
+
         if (engine is ZonosTtsCrispAsr)
         {
             if (!await TtsVoiceInstaller.EnsureCrispAsrForZonos(window, windowService, forceRedownload: false))
@@ -1000,13 +1013,14 @@ public static class TtsEngineInstaller
         IWindowService windowService,
         Func<Task> refreshVoices,
         string engineDisplayName,
-        ModelLicenseDefinition licenseDefinition,
+        ModelLicenseDefinition? licenseDefinition,
         Func<bool> isLicenseAccepted,
         string modelKey,
         Func<string?, bool> areModelsInstalled,
         Action<DownloadTtsViewModel, string> startDownloadModels)
     {
-        if (!isLicenseAccepted())
+        // A null definition means the weights need no acceptance (Apache-2.0 FireRedTTS3).
+        if (licenseDefinition != null && !isLicenseAccepted())
         {
             var licenseResult = await windowService.ShowDialogAsync<ModelLicenseWindow, ModelLicenseViewModel>(
                 window, vm => vm.Initialize(licenseDefinition));

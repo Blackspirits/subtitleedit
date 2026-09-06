@@ -269,6 +269,14 @@ public static class DownloadHashManager
         public const string ModelBf16 = "FishTtsAudioCpp.ModelBf16";
     }
 
+    public static class FireRedTts3AudioCpp
+    {
+        // SHA-256 of the FireRedTTS3-Base GGUFs on audio-cpp/audio.cpp-gguf (HF LFS oid).
+        // The engine binaries are the shared audio.cpp archives keyed under IndexTts25AudioCpp.
+        public const string ModelQ8_0 = "FireRedTts3AudioCpp.ModelQ8_0";
+        public const string ModelOrig = "FireRedTts3AudioCpp.ModelOrig";
+    }
+
     public static class ZonosTtsCrispAsr
     {
         // SHA-256 of the Zonos-v0.1 transformer (Q8_0) and the shared DAC 44 kHz codec.
@@ -1987,6 +1995,16 @@ public static class DownloadHashManager
             [FishTtsAudioCpp.ModelBf16] = new[]
             {
                 "781fdece3ff837838c48f7d5a7b37e37c4d661a6416416ad57fe92fed47d96ff", // fish-audio-s2-pro-bf16.gguf
+            },
+
+            // FireRedTTS3-Base weights, from audio-cpp/audio.cpp-gguf (HF LFS oid).
+            [FireRedTts3AudioCpp.ModelQ8_0] = new[]
+            {
+                "68acd5bce0d87a53bb5b88255c65e19df4cbc6017b4bab0824e96f1e2351c3a7", // fireredtts3-base-q8_0.gguf
+            },
+            [FireRedTts3AudioCpp.ModelOrig] = new[]
+            {
+                "1af06f341044121ddebb389c1e6e5181a43f65e2591f77c7eda2ca5810e484c8", // fireredtts3-base-orig.gguf
             },
 
             // audio.cpp engine archives we build in SubtitleEdit/support-files

@@ -306,6 +306,7 @@ public static class DependencyInjectionExtensions
         collection.AddHttpClientWithProxy<IIndexTts25AudioCppDownloadService, IndexTts25AudioCppDownloadService>();
         collection.AddHttpClientWithProxy<IHiggsTtsAudioCppDownloadService, HiggsTtsAudioCppDownloadService>();
         collection.AddHttpClientWithProxy<IFishTtsAudioCppDownloadService, FishTtsAudioCppDownloadService>();
+        collection.AddHttpClientWithProxy<IFireRedTts3AudioCppDownloadService, FireRedTts3AudioCppDownloadService>();
         collection.AddHttpClientWithProxy<ICosyVoice3CrispAsrDownloadService, CosyVoice3CrispAsrDownloadService>();
         collection.AddHttpClientWithProxy<IF5TtsCrispAsrDownloadService, F5TtsCrispAsrDownloadService>();
         collection.AddHttpClientWithProxy<IOmniVoiceCrispAsrDownloadService, OmniVoiceCrispAsrDownloadService>();

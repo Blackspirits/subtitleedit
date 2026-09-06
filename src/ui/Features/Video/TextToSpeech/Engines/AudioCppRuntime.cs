@@ -6,7 +6,7 @@ namespace Nikse.SubtitleEdit.Features.Video.TextToSpeech.Engines;
 
 /// <summary>
 /// The pieces of the audio.cpp install shared by every engine that runs on it (IndexTTS 2.5,
-/// Higgs Audio v3, Fish Audio S2 Pro): one binaries folder, one server executable, and one
+/// Higgs Audio v3, Fish Audio S2 Pro, FireRedTTS3): one binaries folder, one server executable, and one
 /// backend marker. The binaries are downloaded once and reused by all of them; each engine
 /// still runs its own server process on its own loopback port with its own model.
 /// </summary>
