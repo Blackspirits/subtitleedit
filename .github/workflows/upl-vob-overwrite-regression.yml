@@ -1,6 +1,9 @@
 name: UPL VOB overwrite regression
 
 on:
+  push:
+    branches:
+      - upl/fix-vob-overwrite-work
   pull_request:
     branches:
       - upl/upstream-main-05cd5a7
@@ -10,12 +13,12 @@ permissions:
 
 jobs:
   patch-and-test:
-    if: github.head_ref == 'upl/fix-vob-overwrite-work'
+    if: github.ref_name == 'upl/fix-vob-overwrite-work' || github.head_ref == 'upl/fix-vob-overwrite-work'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ github.head_ref }}
+          ref: upl/fix-vob-overwrite-work
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
@@ -23,167 +26,7 @@ jobs:
           dotnet-version: '10.0.x'
 
       - name: Apply minimal overwrite fix and regression
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          extractor_path = Path('src/seconv/Core/VobSubExtractor.cs')
-          extractor = extractor_path.read_text(encoding='utf-8-sig')
-
-          old_sig = 'public static IReadOnlyList<StreamOutput> Extract(IReadOnlyList<string> vobFiles, string subOutputPath, bool isPal)'
-          new_sig = 'public static IReadOnlyList<StreamOutput> Extract(IReadOnlyList<string> vobFiles, string subOutputPath, bool isPal, bool overwrite = true)'
-          assert extractor.count(old_sig) == 1, extractor.count(old_sig)
-          extractor = extractor.replace(old_sig, new_sig)
-
-          old_block = '''        var outputs = new List<StreamOutput>(streams.Count);
-          for (var i = 0; i < streams.Count; i++)
-          {
-              var streamId = streams[i].Key;
-              var streamPacks = streams[i].OrderBy(p => p.StartTime.Ticks).ToList();
-
-              var outputPath = streams.Count == 1
-                  ? subOutputPath
-                  : InsertStreamIndex(subOutputPath, i);
-
-              var written = WriteOneStream(streamPacks, outputPath, isPal, streamId);
-              outputs.Add(new StreamOutput(outputPath, streamId, written));
-          }
-'''
-          new_block = '''        var outputPaths = BuildOutputPaths(subOutputPath, streams.Count);
-          EnsureOutputFilesCanBeWritten(outputPaths, overwrite);
-
-          var outputs = new List<StreamOutput>(streams.Count);
-          for (var i = 0; i < streams.Count; i++)
-          {
-              var streamId = streams[i].Key;
-              var streamPacks = streams[i].OrderBy(p => p.StartTime.Ticks).ToList();
-              var outputPath = outputPaths[i];
-
-              var written = WriteOneStream(streamPacks, outputPath, isPal, streamId);
-              outputs.Add(new StreamOutput(outputPath, streamId, written));
-          }
-'''
-          assert extractor.count(old_block) == 1, extractor.count(old_block)
-          extractor = extractor.replace(old_block, new_block)
-
-          anchor = '''    private static int WriteOneStream(IReadOnlyList<VobSubMergedPack> packs, string outputPath, bool isPal, int streamId)
-'''
-          helpers = '''    internal static IReadOnlyList<string> BuildOutputPaths(string subOutputPath, int streamCount)
-    {
-        if (streamCount <= 0)
-        {
-            return [];
-        }
-
-        if (streamCount == 1)
-        {
-            return [subOutputPath];
-        }
-
-        var outputPaths = new List<string>(streamCount);
-        for (var i = 0; i < streamCount; i++)
-        {
-            outputPaths.Add(InsertStreamIndex(subOutputPath, i));
-        }
-
-        return outputPaths;
-    }
-
-    internal static void EnsureOutputFilesCanBeWritten(IReadOnlyList<string> outputPaths, bool overwrite)
-    {
-        if (overwrite)
-        {
-            return;
-        }
-
-        foreach (var outputPath in outputPaths)
-        {
-            var idxPath = Path.ChangeExtension(outputPath, ".idx");
-            foreach (var path in new[] { outputPath, idxPath })
-            {
-                if (File.Exists(path))
-                {
-                    throw new IOException($"Output file already exists: {path}. Pass --overwrite to replace it.");
-                }
-            }
-        }
-    }
-
-'''
-          assert extractor.count(anchor) == 1, extractor.count(anchor)
-          extractor = extractor.replace(anchor, helpers + anchor)
-          extractor_path.write_text(extractor, encoding='utf-8')
-
-          converter_path = Path('src/seconv/Core/SubtitleConverter.cs')
-          converter = converter_path.read_text(encoding='utf-8-sig')
-          old_preflight = '''        // Overwrite check is best-effort against the base path. Multi-stream DVDs land
-        // additional outputs at <stem>.<n>.sub which we can't predict without parsing —
-        // those existing files will be overwritten silently. Acceptable for now since
-        // multi-stream DVDs are rare and the user opted into the batch by passing all VOBs.
-        if (!options.Overwrite)
-        {
-            var pair = new[] { outputBase, Path.ChangeExtension(outputBase, ".idx") };
-            foreach (var p in pair)
-            {
-                if (File.Exists(p))
-                {
-                    result.Errors.Add($"Output file already exists: {p}. Pass --overwrite to replace it.");
-                    result.FailedFiles = vobFiles.Count;
-                    return result;
-                }
-            }
-        }
-
-'''
-          assert converter.count(old_preflight) == 1, converter.count(old_preflight)
-          converter = converter.replace(old_preflight, '')
-          old_call = 'var outputs = VobSubExtractor.Extract(vobFiles, outputBase, isPal: true);'
-          new_call = 'var outputs = VobSubExtractor.Extract(vobFiles, outputBase, isPal: true, overwrite: options.Overwrite);'
-          assert converter.count(old_call) == 1, converter.count(old_call)
-          converter = converter.replace(old_call, new_call)
-          converter_path.write_text(converter, encoding='utf-8')
-
-          test_path = Path('tests/seconv/Core/VobSubExtractorTest.cs')
-          test = test_path.read_text(encoding='utf-8-sig')
-          insert_before = '\n}\n'
-          regression = r'''
-
-    [Fact]
-    public void EnsureOutputFilesCanBeWritten_MultiStream_NoOverwrite_ProtectsNumberedOutputs()
-    {
-        var outputBase = Path.Combine(_tempRoot, "movie.sub");
-        var outputPaths = VobSubExtractor.BuildOutputPaths(outputBase, 2);
-        Assert.Equal(Path.Combine(_tempRoot, "movie.0.sub"), outputPaths[0]);
-        Assert.Equal(Path.Combine(_tempRoot, "movie.1.sub"), outputPaths[1]);
-
-        var existing = Path.ChangeExtension(outputPaths[1], ".idx");
-        File.WriteAllText(existing, "keep-me");
-
-        var ex = Assert.Throws<IOException>(() =>
-            VobSubExtractor.EnsureOutputFilesCanBeWritten(outputPaths, overwrite: false));
-
-        Assert.Contains(existing, ex.Message);
-        Assert.Equal("keep-me", File.ReadAllText(existing));
-        Assert.False(File.Exists(outputPaths[0]));
-        Assert.False(File.Exists(outputPaths[1]));
-    }
-
-    [Fact]
-    public void EnsureOutputFilesCanBeWritten_MultiStream_DoesNotBlockUnusedBasePath()
-    {
-        var outputBase = Path.Combine(_tempRoot, "movie.sub");
-        File.WriteAllText(outputBase, "unrelated-existing-base");
-
-        var outputPaths = VobSubExtractor.BuildOutputPaths(outputBase, 2);
-        VobSubExtractor.EnsureOutputFilesCanBeWritten(outputPaths, overwrite: false);
-
-        Assert.Equal("unrelated-existing-base", File.ReadAllText(outputBase));
-    }
-'''
-          assert test.endswith(insert_before)
-          test = test[:-len(insert_before)] + regression + insert_before
-          test_path.write_text(test, encoding='utf-8')
-          PY
+        run: python .github/scripts/upl_vob_overwrite_patch.py
 
       - name: Targeted regression tests
         run: dotnet test tests/seconv/SeConvTests.csproj --filter VobSubExtractorTest
@@ -196,5 +39,7 @@ jobs:
           git config user.name 'BlackSpirits'
           git config user.email 'blackspirits@gmail.com'
           git add src/seconv/Core/VobSubExtractor.cs src/seconv/Core/SubtitleConverter.cs tests/seconv/Core/VobSubExtractorTest.cs
-          git commit -m 'Protect multi-stream VOB outputs from accidental overwrite'
-          git push origin HEAD:${{ github.head_ref }}
+          if ! git diff --cached --quiet; then
+            git commit -m 'Protect multi-stream VOB outputs from accidental overwrite'
+            git push origin HEAD:upl/fix-vob-overwrite-work
+          fi
