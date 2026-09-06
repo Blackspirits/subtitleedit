@@ -4235,19 +4235,25 @@ public class AudioVisualizer : Control
     }
 
     /// <summary>
-    /// Seeks silence in volume
+    /// "Guess start": finds the moment the speech around <paramref name="startSeconds"/> begins,
+    /// i.e. where the silence before it ends. A cue that sits in silence is moved forward to the
+    /// first speech within <paramref name="maxForwardSeconds"/>; a cue that sits in speech is
+    /// moved back to the silence before it, up to 1 s back. SE 4 always looked 0.8 s ahead, so a
+    /// start cue more than that early gave up (#14596); callers now pass how far the start may
+    /// move, and the audio right after the cue is judged over that whole stretch.
     /// </summary>
     /// <returns>video position in seconds, -1 if not found</returns>
-    public double FindDataBelowThresholdBackForStart(double thresholdPercent, double durationInSeconds, double startSeconds)
+    public double FindDataBelowThresholdBackForStart(double thresholdPercent, double durationInSeconds, double startSeconds, double maxForwardSeconds = 0.8)
     {
         if (WavePeaks == null || WavePeaks.Peaks.Count == 0)
         {
             return -1;
         }
 
+        maxForwardSeconds = Math.Max(0.8, maxForwardSeconds);
         var min = Math.Max(0, SecondsToSampleIndex(startSeconds - 1));
         var maxShort = Math.Min(WavePeaks.Peaks.Count, SecondsToSampleIndex(startSeconds + durationInSeconds + 0.01));
-        var max = Math.Min(WavePeaks.Peaks.Count, SecondsToSampleIndex(startSeconds + durationInSeconds + 0.8));
+        var max = Math.Min(WavePeaks.Peaks.Count, SecondsToSampleIndex(startSeconds + durationInSeconds + maxForwardSeconds));
         var length = SecondsToSampleIndex(durationInSeconds);
         var threshold = thresholdPercent / 100.0 * WavePeaks.HighestPeak;
 
@@ -4259,6 +4265,7 @@ public class AudioVisualizer : Control
 
         // look for start silence in the beginning of subtitle
         min = SecondsToSampleIndex(startSeconds);
+        var currentMinMax = GetMinAndMax(min, max);
         var hitCount = 0;
         int index;
         for (index = min; index < max; index++)
@@ -4270,8 +4277,7 @@ public class AudioVisualizer : Control
             else
             {
                 minMax = GetMinAndMax(min, index);
-                var currentMinMax = GetMinAndMax(SecondsToSampleIndex(startSeconds), SecondsToSampleIndex(startSeconds + 0.8));
-                if (currentMinMax.Avg > minMax.Avg + 300 || currentMinMax.Avg < 1000 && minMax.Avg < 1000 && Math.Abs(currentMinMax.Avg - minMax.Avg) < 500)
+                if (IsSilenceRunFollowedBySpeech(minMax, currentMinMax))
                 {
                     break;
                 }
@@ -4283,8 +4289,7 @@ public class AudioVisualizer : Control
         if (hitCount > length)
         {
             minMax = GetMinAndMax(min, index);
-            var currentMinMax = GetMinAndMax(SecondsToSampleIndex(startSeconds), SecondsToSampleIndex(startSeconds + 0.8));
-            if (currentMinMax.Avg > minMax.Avg + 300 || currentMinMax.Avg < 1000 && minMax.Avg < 1000 && Math.Abs(currentMinMax.Avg - minMax.Avg) < 500)
+            if (IsSilenceRunFollowedBySpeech(minMax, currentMinMax))
             {
                 return Math.Max(0, SampleIndexToSeconds(index - 1) - 0.01);
             }
@@ -4324,9 +4329,11 @@ public class AudioVisualizer : Control
     /// </list>
     /// Like the start variant the result is padded by 10 ms away from the speech and the search gives up
     /// when the audio around the cue is all about the same level (nothing to detect).
+    /// <paramref name="maxBackSeconds"/> is how far back the speech may end: an end cue left
+    /// hanging longer than the fixed 1 s of the first version found nothing (#14596).
     /// </summary>
     /// <returns>video position in seconds, -1 if not found</returns>
-    public double FindDataBelowThresholdForwardForEnd(double thresholdPercent, double durationInSeconds, double endSeconds)
+    public double FindDataBelowThresholdForwardForEnd(double thresholdPercent, double durationInSeconds, double endSeconds, double maxBackSeconds = 1)
     {
         if (WavePeaks == null || WavePeaks.Peaks.Count == 0)
         {
@@ -4334,7 +4341,7 @@ public class AudioVisualizer : Control
         }
 
         var count = WavePeaks.Peaks.Count;
-        var min = Math.Max(0, SecondsToSampleIndex(endSeconds - 1));
+        var min = Math.Max(0, SecondsToSampleIndex(endSeconds - Math.Max(1, maxBackSeconds)));
         var max = Math.Min(count, SecondsToSampleIndex(endSeconds + 1));
         var end = SecondsToSampleIndex(endSeconds);
         if (end < 0 || end >= count || max <= min)
@@ -4401,6 +4408,17 @@ public class AudioVisualizer : Control
         }
 
         return -1;
+    }
+
+    /// <summary>
+    /// SE 4's test that a quiet run <paramref name="run"/> starting at a cue is the silence in
+    /// front of the speech: the stretch after the cue <paramref name="ahead"/> is clearly louder
+    /// than the run, or both are quiet and about the same (the cue sits in plain silence).
+    /// </summary>
+    private static bool IsSilenceRunFollowedBySpeech(MinMax run, MinMax ahead)
+    {
+        return ahead.Avg > run.Avg + 300 ||
+               ahead.Avg < 1000 && run.Avg < 1000 && Math.Abs(ahead.Avg - run.Avg) < 500;
     }
 
     /// <summary>

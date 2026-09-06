@@ -5670,35 +5670,62 @@ public partial class MainViewModel :
     /// one. Raising the volume threshold step by step finds the quietest boundary that still reads
     /// as silence. Moving the start forward keeps the duration when that would otherwise break the
     /// minimum duration/maximum CPS rules and there is room before the next line.
+    /// Every outcome is reported in the status bar (#14596): a silent no-op left "no silence found",
+    /// "already at the boundary" and "the shortcut never fired" indistinguishable (#14472, #14555).
     /// </summary>
     [RelayCommand]
     private void WaveformGuessStart()
     {
         var selected = SelectedSubtitle;
-        if (selected == null || AreTimeCodesLocked || AudioVisualizer?.WavePeaks == null)
+        if (selected == null)
         {
+            ShowStatus(Se.Language.Main.Waveform.GuessStartNoLineSelected);
+            return;
+        }
+
+        if (AreTimeCodesLocked)
+        {
+            ShowStatus(Se.Language.Main.Waveform.GuessStartTimeCodesLocked);
+            return;
+        }
+
+        if (AudioVisualizer?.WavePeaks == null)
+        {
+            ShowStatus(Se.Language.Main.Waveform.GuessStartNoWaveform);
             return;
         }
 
         var index = Subtitles.IndexOf(selected);
         if (index < 0)
         {
+            ShowStatus(Se.Language.Main.Waveform.GuessStartNoLineSelected);
             return;
         }
 
         const double silenceLengthInSeconds = 0.08;
         var startSeconds = selected.StartTime.TotalSeconds;
-        var lowPercent = AudioVisualizer.FindLowPercentage(startSeconds - 0.3, startSeconds + 0.1);
-        var highPercent = AudioVisualizer.FindHighPercentage(startSeconds - 0.3, startSeconds + 0.4);
+        // The start may move back 1 s, or forward as far as the line's end allows (#14596): SE 4
+        // looked only 0.8 s ahead, so a start cue left more than that early never moved.
+        var minDisplayMs = Se.Settings.General.SubtitleMinimumDisplayMilliseconds;
+        var reachSeconds = Math.Max(0.8, (selected.EndTime.TotalMilliseconds - minDisplayMs) / TimeCode.BaseUnit - startSeconds);
+        // The noise floor is read over the whole stretch the start can move back in (#14596): a
+        // cue that sits inside the speech has nothing but speech right around it, and a floor
+        // read there anchors the sweep so high that a soft syllable counts as the silence. The
+        // peak is read over the stretch ahead so the sweep starts above a noisy bed when the
+        // speech is loud.
+        var lowPercent = AudioVisualizer.FindLowPercentage(startSeconds - 1.0, startSeconds + 0.1);
+        var highPercent = AudioVisualizer.FindHighPercentage(startSeconds - 0.3, startSeconds + reachSeconds);
         var sweep = GetGuessVolumeSweep(lowPercent, highPercent);
 
         var gapMs = Se.Settings.General.MinimumBetweenLines.GetMilliseconds();
         var prev = GetPreviousWorkingRow(index);
         var next = GetNextWorkingRow(index);
+        var alreadyAtBoundary = false;
+        var lastCandidateMs = double.NaN;
 
         for (var startVolume = sweep.Start; startVolume < sweep.End; startVolume += 0.3)
         {
-            var pos = AudioVisualizer.FindDataBelowThresholdBackForStart(startVolume, silenceLengthInSeconds, startSeconds);
+            var pos = AudioVisualizer.FindDataBelowThresholdBackForStart(startVolume, silenceLengthInSeconds, startSeconds, reachSeconds);
             if (pos < 0 || pos <= startSeconds - 1)
             {
                 continue;
@@ -5706,7 +5733,7 @@ public partial class MainViewModel :
 
             // A slightly higher threshold that still lands inside the same silence is the
             // better guess - it sits closer to the speech.
-            var pos2 = AudioVisualizer.FindDataBelowThresholdBackForStart(startVolume + 0.3, silenceLengthInSeconds, startSeconds);
+            var pos2 = AudioVisualizer.FindDataBelowThresholdBackForStart(startVolume + 0.3, silenceLengthInSeconds, startSeconds, reachSeconds);
             if (pos2 > pos && pos2 > startSeconds - 1)
             {
                 pos = pos2;
@@ -5720,7 +5747,9 @@ public partial class MainViewModel :
                 newStartMs = prev.EndTime.TotalMilliseconds + gapMs;
                 if (newStartMs >= selected.StartTime.TotalMilliseconds)
                 {
-                    break; // cannot move the start time
+                    // No threshold can help: anything earlier is clamped to the same spot.
+                    ShowStatus(string.Format(Se.Language.Main.Waveform.GuessStartNoRoomBeforePreviousLineX, selected.Number));
+                    return;
                 }
             }
 
@@ -5744,7 +5773,22 @@ public partial class MainViewModel :
 
             if (Math.Abs(selected.StartTime.TotalMilliseconds - newStartMs) < 10)
             {
-                break; // difference too small
+                // The boundary at this threshold is where the cue already is. SE 4 stopped here,
+                // but on a noisy bed a low threshold is fooled by a single loud sample right next
+                // to the cue while a higher one sees through it to the real onset (#14596), so
+                // keep climbing; a cue that really is at the boundary ends with no change.
+                alreadyAtBoundary = true;
+                lastCandidateMs = newStartMs;
+                continue;
+            }
+
+            if (alreadyAtBoundary && !IsGuessJump(newStartMs, lastCandidateMs))
+            {
+                // A boundary that only creeps with the threshold is the soft edge of the speech
+                // the cue is already on; taking it would walk the cue into the speech a few ms
+                // per key press. Only a boundary that jumps clear is a silence seen through.
+                lastCandidateMs = newStartMs;
+                continue;
             }
 
             var durationMs = selected.EndTime.TotalMilliseconds - selected.StartTime.TotalMilliseconds;
@@ -5753,7 +5797,7 @@ public partial class MainViewModel :
             {
                 var newStart = TimeSpanExtensions.FromMillisecondsWholeMilliseconds(newStartMs);
                 var newCps = SubtitleTextInfoHelper.GetCharactersPerSecond(selected.Text, newStart, selected.EndTime);
-                if (newEndMs - newStartMs < Se.Settings.General.SubtitleMinimumDisplayMilliseconds ||
+                if (newEndMs - newStartMs < minDisplayMs ||
                     newCps > Se.Settings.General.SubtitleMaximumCharactersPerSeconds)
                 {
                     // Shortening the line would break the rules, so move it instead - but only
@@ -5765,13 +5809,19 @@ public partial class MainViewModel :
                 }
             }
 
+            var movedMs = newStartMs - selected.StartTime.TotalMilliseconds;
             selected.SetTimes(
                 TimeSpanExtensions.FromMillisecondsWholeMilliseconds(newStartMs),
                 TimeSpanExtensions.FromMillisecondsWholeMilliseconds(newEndMs));
 
             _updateAudioVisualizer = true;
-            break;
+            ShowStatus(string.Format(Se.Language.Main.Waveform.GuessStartMovedLineXByYMs, selected.Number, FormatSignedMs(movedMs)));
+            return;
         }
+
+        ShowStatus(string.Format(alreadyAtBoundary
+            ? Se.Language.Main.Waveform.GuessStartLineXAlreadyAtBoundary
+            : Se.Language.Main.Waveform.GuessStartNoSilenceFoundNearLineX, selected.Number));
     }
 
     /// <summary>
@@ -5785,14 +5835,28 @@ public partial class MainViewModel :
     private void WaveformGuessEnd()
     {
         var selected = SelectedSubtitle;
-        if (selected == null || AreTimeCodesLocked || AudioVisualizer?.WavePeaks == null)
+        if (selected == null)
         {
+            ShowStatus(Se.Language.Main.Waveform.GuessEndNoLineSelected);
+            return;
+        }
+
+        if (AreTimeCodesLocked)
+        {
+            ShowStatus(Se.Language.Main.Waveform.GuessEndTimeCodesLocked);
+            return;
+        }
+
+        if (AudioVisualizer?.WavePeaks == null)
+        {
+            ShowStatus(Se.Language.Main.Waveform.GuessEndNoWaveform);
             return;
         }
 
         var index = Subtitles.IndexOf(selected);
         if (index < 0)
         {
+            ShowStatus(Se.Language.Main.Waveform.GuessEndNoLineSelected);
             return;
         }
 
@@ -5800,18 +5864,26 @@ public partial class MainViewModel :
         var startMs = selected.StartTime.TotalMilliseconds;
         var endMs = selected.EndTime.TotalMilliseconds;
         var endSeconds = selected.EndTime.TotalSeconds;
+        // The end may move forward 1 s, or back as far as the line's start allows (#14596): the
+        // first version looked only 1 s back, so an end cue left hanging longer than that - the
+        // very cue "guess end" exists for - never moved.
+        var minDisplayMs = Se.Settings.General.SubtitleMinimumDisplayMilliseconds;
+        var reachSeconds = Math.Max(1, endSeconds - (startMs + minDisplayMs) / TimeCode.BaseUnit);
         // The noise floor is read over the whole stretch the end can move in: a cue that cuts the
-        // speech short has nothing but speech right around it.
+        // speech short has nothing but speech right around it. The peak is read over the stretch
+        // back so the sweep starts above a noisy bed when the speech is loud.
         var lowPercent = AudioVisualizer.FindLowPercentage(endSeconds - 0.3, endSeconds + 1.0);
-        var highPercent = AudioVisualizer.FindHighPercentage(endSeconds - 0.4, endSeconds + 0.3);
+        var highPercent = AudioVisualizer.FindHighPercentage(endSeconds - reachSeconds, endSeconds + 0.3);
         var sweep = GetGuessVolumeSweep(lowPercent, highPercent);
 
         var gapMs = Se.Settings.General.MinimumBetweenLines.GetMilliseconds();
         var next = GetNextWorkingRow(index);
+        var alreadyAtBoundary = false;
+        var lastCandidateMs = double.NaN;
 
         for (var volume = sweep.Start; volume < sweep.End; volume += 0.3)
         {
-            var pos = AudioVisualizer.FindDataBelowThresholdForwardForEnd(volume, silenceLengthInSeconds, endSeconds);
+            var pos = AudioVisualizer.FindDataBelowThresholdForwardForEnd(volume, silenceLengthInSeconds, endSeconds, reachSeconds);
             if (pos < 0 || pos >= endSeconds + 1)
             {
                 continue;
@@ -5819,7 +5891,7 @@ public partial class MainViewModel :
 
             // A slightly higher threshold that still lands inside the same silence is the
             // better guess - it sits closer to the speech.
-            var pos2 = AudioVisualizer.FindDataBelowThresholdForwardForEnd(volume + 0.3, silenceLengthInSeconds, endSeconds);
+            var pos2 = AudioVisualizer.FindDataBelowThresholdForwardForEnd(volume + 0.3, silenceLengthInSeconds, endSeconds, reachSeconds);
             if (pos2 >= 0 && pos2 < pos && pos2 * TimeCode.BaseUnit > startMs)
             {
                 pos = pos2;
@@ -5831,7 +5903,9 @@ public partial class MainViewModel :
                 newEndMs = next.StartTime.TotalMilliseconds - gapMs;
                 if (newEndMs <= endMs)
                 {
-                    break; // cannot move the end time
+                    // No threshold can help: anything later is clamped to the same spot.
+                    ShowStatus(string.Format(Se.Language.Main.Waveform.GuessEndNoRoomBeforeNextLineX, selected.Number));
+                    return;
                 }
             }
 
@@ -5857,7 +5931,7 @@ public partial class MainViewModel :
             if (newEndMs < endMs)
             {
                 // Shorten only as far as the minimum duration and maximum CPS allow.
-                var minEndMs = startMs + Se.Settings.General.SubtitleMinimumDisplayMilliseconds;
+                var minEndMs = startMs + minDisplayMs;
                 var maxCps = Se.Settings.General.SubtitleMaximumCharactersPerSeconds;
                 if (maxCps > 0)
                 {
@@ -5878,13 +5952,47 @@ public partial class MainViewModel :
 
             if (newEndMs <= startMs || Math.Abs(endMs - newEndMs) < 10)
             {
-                break; // nothing sensible to do / difference too small
+                // See WaveformGuessStart: keep climbing past a boundary that matches the cue.
+                alreadyAtBoundary = true;
+                lastCandidateMs = newEndMs;
+                continue;
+            }
+
+            if (alreadyAtBoundary && !IsGuessJump(newEndMs, lastCandidateMs))
+            {
+                lastCandidateMs = newEndMs;
+                continue;
             }
 
             selected.EndTime = TimeSpanExtensions.FromMillisecondsWholeMilliseconds(newEndMs);
             _updateAudioVisualizer = true;
-            break;
+            ShowStatus(string.Format(Se.Language.Main.Waveform.GuessEndMovedLineXByYMs, selected.Number, FormatSignedMs(newEndMs - endMs)));
+            return;
         }
+
+        ShowStatus(string.Format(alreadyAtBoundary
+            ? Se.Language.Main.Waveform.GuessEndLineXAlreadyAtBoundary
+            : Se.Language.Main.Waveform.GuessEndNoSilenceFoundNearLineX, selected.Number));
+    }
+
+    /// <summary>
+    /// Whether a guess start/end boundary found at one threshold is a different silence from the
+    /// one found at the threshold below, rather than the same edge shifted a sample or two by the
+    /// higher threshold. Waveform peaks are 10 ms apart; a speech onset steeper than a tenth of
+    /// a percent of full scale per sample moves less than 25 ms per 0.3-point step.
+    /// </summary>
+    private static bool IsGuessJump(double candidateMs, double lastCandidateMs)
+    {
+        return Math.Abs(candidateMs - lastCandidateMs) >= 25;
+    }
+
+    /// <summary>
+    /// "+170" / "-180" for the guess start/end status texts: later is positive.
+    /// </summary>
+    private static string FormatSignedMs(double ms)
+    {
+        var rounded = (long)Math.Round(ms);
+        return rounded > 0 ? "+" + rounded.ToString(CultureInfo.InvariantCulture) : rounded.ToString(CultureInfo.InvariantCulture);
     }
 
     [RelayCommand]
