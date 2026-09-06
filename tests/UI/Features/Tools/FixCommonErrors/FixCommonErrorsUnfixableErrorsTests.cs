@@ -15,9 +15,19 @@ namespace UITests.Features.Tools.FixCommonErrors;
 public class FixCommonErrorsUnfixableErrorsTests : IDisposable
 {
     private readonly List<SeFixCommonErrorsProfile> _originalProfiles;
+    private readonly int _minimumDisplayMs = Configuration.Settings.General.SubtitleMinimumDisplayMilliseconds;
+    private readonly int _minimumGapMs = Configuration.Settings.General.MinimumMillisecondsBetweenLines;
+    private readonly bool _allowMoveStartTime = Configuration.Settings.Tools.FixShortDisplayTimesAllowMoveStartTime;
 
     public FixCommonErrorsUnfixableErrorsTests()
     {
+        // The rule reads libse's Configuration.Settings, a mirror that any earlier test can have
+        // left with other values (a zero minimum gap turns the "unfixable" line below into one
+        // that can be extended by 20 ms). Pin what the scenario depends on.
+        Configuration.Settings.General.SubtitleMinimumDisplayMilliseconds = 1000;
+        Configuration.Settings.General.MinimumMillisecondsBetweenLines = 24;
+        Configuration.Settings.Tools.FixShortDisplayTimesAllowMoveStartTime = false;
+
         // Se.Settings is static and starts out without profiles in tests; the scan does nothing
         // without one. Restored in Dispose so no other test sees this profile.
         _originalProfiles = Se.Settings.Tools.FixCommonErrors.Profiles;
@@ -34,6 +44,9 @@ public class FixCommonErrorsUnfixableErrorsTests : IDisposable
     public void Dispose()
     {
         Se.Settings.Tools.FixCommonErrors.Profiles = _originalProfiles;
+        Configuration.Settings.General.SubtitleMinimumDisplayMilliseconds = _minimumDisplayMs;
+        Configuration.Settings.General.MinimumMillisecondsBetweenLines = _minimumGapMs;
+        Configuration.Settings.Tools.FixShortDisplayTimesAllowMoveStartTime = _allowMoveStartTime;
     }
 
     /// <summary>

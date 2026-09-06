@@ -221,11 +221,16 @@ public class SpeechToTextQualityReportTests
         var oldMin = Configuration.Settings.General.SubtitleMinimumDisplayMilliseconds;
         var oldMaxLen = Configuration.Settings.General.SubtitleLineMaximumLength;
         var oldMaxLines = Configuration.Settings.General.MaxNumberOfLines;
+        var oldMinGap = Configuration.Settings.General.MinimumMillisecondsBetweenLines;
         try
         {
             Configuration.Settings.General.SubtitleMinimumDisplayMilliseconds = 1000;
             Configuration.Settings.General.SubtitleLineMaximumLength = 43;
             Configuration.Settings.General.MaxNumberOfLines = 2;
+            // The split spaces the halves by this gap and the short-duration fix keeps it; an
+            // earlier test leaving the mirror at 0 made the halves touch and the first half
+            // unfixable (order-dependent CI flake).
+            Configuration.Settings.General.MinimumMillisecondsBetweenLines = 24;
 
             // Long enough to be split into two lines, short enough that each half is < 1 s.
             var text = "This is the first sentence of the line. This is the second sentence of the line. And a third sentence too.";
@@ -246,6 +251,7 @@ public class SpeechToTextQualityReportTests
             Configuration.Settings.General.SubtitleMinimumDisplayMilliseconds = oldMin;
             Configuration.Settings.General.SubtitleLineMaximumLength = oldMaxLen;
             Configuration.Settings.General.MaxNumberOfLines = oldMaxLines;
+            Configuration.Settings.General.MinimumMillisecondsBetweenLines = oldMinGap;
         }
     }
 }
