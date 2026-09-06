@@ -96,6 +96,15 @@ namespace Nikse.SubtitleEdit.Core.Common
             return s.AsSpan(index).StartsWith(value.AsSpan(), comparison);
         }
 
+        /// <summary>
+        /// "Does the text before <paramref name="endExclusive"/> end with <paramref name="value"/>"
+        /// without allocating the prefix (<c>s.Substring(0, end).EndsWith(value)</c>).
+        /// </summary>
+        public static bool EndsWithAt(this string s, int endExclusive, string value, StringComparison comparison)
+        {
+            return s.AsSpan(0, endExclusive).EndsWith(value.AsSpan(), comparison);
+        }
+
         public static bool StartsWith(this string s, char c)
         {
             return s.Length > 0 && s[0] == c;
