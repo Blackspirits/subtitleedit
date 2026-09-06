@@ -1,12 +1,15 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Presenters;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.VisualTree;
 using Nikse.SubtitleEdit.Core.Common;
 using System;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 
 namespace Nikse.SubtitleEdit.Features.Shared.TextBoxUtils;
@@ -25,6 +28,10 @@ namespace Nikse.SubtitleEdit.Features.Shared.TextBoxUtils;
 /// read-only box stays untouched, and the seams get SE4's spacing: a space is added where the
 /// dropped text would touch a word, none in front of punctuation or after a line break, and the
 /// space a word leaves behind when it is moved out is removed.
+///
+/// While a drag hovers a box, a caret-shaped bar in the box's adorner layer marks where the text
+/// will land (#14568). It is a separate visual rather than the real caret because moving the caret
+/// in the source box would wipe the selection being dragged.
 /// </summary>
 public static class TextBoxTextDragDrop
 {
@@ -40,6 +47,12 @@ public static class TextBoxTextDragDrop
     private static int _dragSourceStart;
     private static int _dragSourceLength;
 
+    private static readonly ConditionalWeakTable<TextBox, DropIndicator> Indicators = new();
+
+    /// <summary>The indicator currently on screen, if any - hidden when the drag ends however
+    /// it ends, so a cancelled drag (Escape) cannot leave a stray bar behind.</summary>
+    private static DropIndicator? _shownIndicator;
+
     public static void Attach(TextBox textBox)
     {
         var session = new PressSession(textBox);
@@ -49,7 +62,9 @@ public static class TextBoxTextDragDrop
         textBox.AddHandler(InputElement.PointerCaptureLostEvent, session.OnPointerCaptureLost, RoutingStrategies.Tunnel);
 
         DragDrop.SetAllowDrop(textBox, true);
+        textBox.AddHandler(DragDrop.DragEnterEvent, OnDragOver);
         textBox.AddHandler(DragDrop.DragOverEvent, OnDragOver);
+        textBox.AddHandler(DragDrop.DragLeaveEvent, OnDragLeave);
         textBox.AddHandler(DragDrop.DropEvent, OnDrop);
     }
 
@@ -190,6 +205,7 @@ public static class TextBoxTextDragDrop
             finally
             {
                 _dragSource = null;
+                HideIndicator();
             }
         }
     }
@@ -218,25 +234,147 @@ public static class TextBoxTextDragDrop
         if (textBox.IsReadOnly || !e.DataTransfer.Contains(DataFormat.Text))
         {
             e.DragEffects = DragDropEffects.None;
+            HideIndicator();
             return;
         }
 
         var isSameBox = ReferenceEquals(_dragSource, textBox);
+        var index = GetCharIndexAtPoint(textBox, e);
+
+        if (isSameBox && !e.KeyModifiers.HasFlag(KeyModifiers.Control) &&
+            index != null && index >= _dragSourceStart && index <= _dragSourceStart + _dragSourceLength)
+        {
+            // Over the text being dragged: a drop here does nothing (see OnDrop), so say so
+            // with the no-drop cursor and no target bar.
+            e.DragEffects = DragDropEffects.None;
+            HideIndicator();
+            return;
+        }
+
         e.DragEffects = isSameBox && !e.KeyModifiers.HasFlag(KeyModifiers.Control)
             ? DragDropEffects.Move
             : DragDropEffects.Copy;
 
-        // Caret follows the pointer so the user can see where the text will land - but not
-        // in the source box, where moving the caret would wipe the selection being dragged.
+        if (index == null)
+        {
+            HideIndicator();
+            return;
+        }
+
+        // Caret follows the pointer too where it can - but not in the source box, where moving
+        // the caret would wipe the selection being dragged.
         if (!isSameBox)
         {
-            var index = GetCharIndexAtPoint(textBox, e);
-            if (index != null)
+            textBox.SelectionStart = index.Value;
+            textBox.SelectionEnd = index.Value;
+            textBox.CaretIndex = index.Value;
+        }
+
+        ShowIndicator(textBox, index.Value);
+    }
+
+    private static void OnDragLeave(object? sender, RoutedEventArgs e)
+    {
+        HideIndicator();
+    }
+
+    /// <summary>
+    /// Puts the drop-target bar at the caret rectangle of <paramref name="index"/>, in the
+    /// box's adorner layer so it sits above the text and outside the box's own rendering.
+    /// </summary>
+    private static void ShowIndicator(TextBox textBox, int index)
+    {
+        var presenter = FindPresenter(textBox);
+        var layer = AdornerLayer.GetAdornerLayer(textBox);
+        if (presenter == null || layer == null)
+        {
+            HideIndicator();
+            return;
+        }
+
+        var rect = presenter.TextLayout.HitTestTextPosition(index);
+        var top = presenter.TranslatePoint(rect.TopLeft, textBox);
+        var bottom = presenter.TranslatePoint(rect.BottomLeft, textBox);
+        if (top == null || bottom == null)
+        {
+            HideIndicator();
+            return;
+        }
+
+        var indicator = Indicators.GetValue(textBox, static box => new DropIndicator(box));
+        if (indicator.Parent != layer)
+        {
+            (indicator.Parent as AdornerLayer)?.Children.Remove(indicator);
+            layer.Children.Add(indicator);
+        }
+
+        if (_shownIndicator != null && !ReferenceEquals(_shownIndicator, indicator))
+        {
+            HideIndicator();
+        }
+
+        _shownIndicator = indicator;
+        indicator.Update(top.Value, bottom.Value, textBox.CaretBrush ?? textBox.Foreground);
+    }
+
+    private static void HideIndicator()
+    {
+        var indicator = _shownIndicator;
+        _shownIndicator = null;
+        if (indicator?.Parent is AdornerLayer layer)
+        {
+            layer.Children.Remove(indicator);
+        }
+    }
+
+    /// <summary>
+    /// Test seam: true while the drop-target bar is shown for <paramref name="textBox"/>.
+    /// </summary>
+    internal static bool IsIndicatorShownForTest(TextBox textBox)
+    {
+        return _shownIndicator != null && ReferenceEquals(_shownIndicator.TextBox, textBox) &&
+               _shownIndicator.Parent is AdornerLayer;
+    }
+
+    /// <summary>
+    /// The drop-target bar: a caret-width vertical line between two points in the adorned
+    /// box's coordinates, drawn with the box's caret colour so it reads as "the caret will be
+    /// here" in every theme.
+    /// </summary>
+    private sealed class DropIndicator : Control
+    {
+        private Point _top;
+        private Point _bottom;
+        private IBrush? _brush;
+
+        public DropIndicator(TextBox textBox)
+        {
+            TextBox = textBox;
+            IsHitTestVisible = false;
+            AdornerLayer.SetAdornedElement(this, textBox);
+        }
+
+        public TextBox TextBox { get; }
+
+        public void Update(Point top, Point bottom, IBrush? brush)
+        {
+            _top = top;
+            _bottom = bottom;
+            _brush = brush;
+            InvalidateVisual();
+        }
+
+        public override void Render(DrawingContext context)
+        {
+            if (_bottom.Y <= _top.Y)
             {
-                textBox.SelectionStart = index.Value;
-                textBox.SelectionEnd = index.Value;
-                textBox.CaretIndex = index.Value;
+                return;
             }
+
+            // Two pixels wide, snapped to whole pixels so it does not blur into the glyphs.
+            var x = Math.Round(_top.X) + 0.5;
+            var pen = new Pen(_brush ?? Brushes.Gray, 2);
+            context.DrawLine(pen, new Point(x, _top.Y), new Point(x, _bottom.Y));
         }
     }
 
@@ -254,6 +392,7 @@ public static class TextBoxTextDragDrop
         }
 
         e.Handled = true;
+        HideIndicator();
 
         var index = GetCharIndexAtPoint(textBox, e) ?? (textBox.Text?.Length ?? 0);
         var isMove = ReferenceEquals(_dragSource, textBox) && !e.KeyModifiers.HasFlag(KeyModifiers.Control);
