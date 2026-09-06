@@ -3279,21 +3279,24 @@ public partial class TextToSpeechViewModel : ObservableObject
     }
 
     /// <summary>
-    /// What the video says during <paramref name="paragraph"/> - the reference clip's transcript.
+    /// What the video says during <paramref name="paragraph"/> - the reference clip's transcript -
+    /// or null when that is not known.
     /// </summary>
     /// <remarks>
     /// The source-language line when a subtitle in the video's own language is loaded next to the
     /// translation, matched by start time rather than by index so a translation with merged or
-    /// split lines still lines up. Without an original loaded the line's own text is the best
-    /// guess left; that is right when dubbing a subtitle in the video's language, and merely
-    /// unhelpful (not harmful) when the text has already been translated.
+    /// split lines still lines up. Without an original loaded the answer is null, NOT the line's
+    /// own text: the cloning engines put that transcript in the same prompt as the text to speak,
+    /// and when the "transcript" is the translation of what the clip says, they are told the clip
+    /// already contains the target text - and Fish Audio S2 Pro then replays the clip (the
+    /// original-language audio) instead of speaking the line (#14480). A missing transcript
+    /// merely costs some clone fidelity on the engines that use it; a wrong one costs the dub.
     /// </remarks>
-    private string GetSpokenTextInVideo(Paragraph paragraph)
+    private string? GetSpokenTextInVideo(Paragraph paragraph)
     {
-        var fallback = HtmlUtil.RemoveHtmlTags(paragraph.Text ?? string.Empty, alsoSsaTags: true);
         if (_originalSubtitle == null || _originalSubtitle.Paragraphs.Count == 0)
         {
-            return Utilities.UnbreakLine(fallback);
+            return null;
         }
 
         // Exact start time is the normal case (a translation keeps the original's timings); the
@@ -3312,11 +3315,11 @@ public partial class TextToSpeechViewModel : ObservableObject
 
         if (Math.Abs(best.StartTime.TotalMilliseconds - paragraph.StartTime.TotalMilliseconds) > 500)
         {
-            return Utilities.UnbreakLine(fallback);
+            return null;
         }
 
         var original = HtmlUtil.RemoveHtmlTags(best.Text ?? string.Empty, alsoSsaTags: true);
-        return Utilities.UnbreakLine(string.IsNullOrWhiteSpace(original) ? fallback : original);
+        return string.IsNullOrWhiteSpace(original) ? null : Utilities.UnbreakLine(original);
     }
 
     /// <summary>
