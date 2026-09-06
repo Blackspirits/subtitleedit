@@ -1527,8 +1527,8 @@ public class FfmpegGenerator
         int sampleRate = 24000,
         double minimumSeconds = 0)
     {
-        var start = $"{startSeconds:0.000}".Replace(",", ".");
-        var duration = $"{durationSeconds:0.000}".Replace(",", ".");
+        var start = startSeconds.ToString("0.000", CultureInfo.InvariantCulture);
+        var duration = durationSeconds.ToString("0.000", CultureInfo.InvariantCulture);
 
         var args = $"-y -ss {start} -t {duration} -i \"{videoFileName}\"";
         if (audioTrackFfIndex >= 0)
@@ -1568,8 +1568,8 @@ public class FfmpegGenerator
        int sampleRate = 16000,
        string audioBitRate = "32k")
     {
-        var start = $"{startSeconds:0.000}".Replace(",", ".");
-        var duration = $"{durationSeconds:0.000}".Replace(",", ".");
+        var start = startSeconds.ToString("0.000", CultureInfo.InvariantCulture);
+        var duration = durationSeconds.ToString("0.000", CultureInfo.InvariantCulture);
 
         // Base parameters
         var args = $"-y -ss {start} -t {duration} -i \"{videoFileName}\"";

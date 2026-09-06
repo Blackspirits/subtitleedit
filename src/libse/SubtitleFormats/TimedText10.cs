@@ -589,10 +589,20 @@ namespace Nikse.SubtitleEdit.Core.SubtitleFormats
 
                 ConvertParagraphNodeToTtmlNode(paragraphContent.DocumentElement, xml, paragraph);
             }
-            catch  // Wrong markup, clear it
+            catch  // Wrong markup (e.g. a literal "5 < 6" in the text): keep the words and line breaks, drop the tags
             {
-                text = Regex.Replace(text, "[<>]", "");
-                paragraph.AppendChild(xml.CreateTextNode(text));
+                // Stripping every < and > turned "<i>Two</i> lines<br/>here 5 < 6" into
+                // "iTwo/i linesbr/here 5 6" - the tags became text and the line break was lost.
+                var fallbackLines = text.Split(new[] { "<br/>" }, StringSplitOptions.None);
+                for (var i = 0; i < fallbackLines.Length; i++)
+                {
+                    if (i > 0)
+                    {
+                        paragraph.AppendChild(xml.CreateElement("br"));
+                    }
+
+                    paragraph.AppendChild(xml.CreateTextNode(HtmlUtil.RemoveHtmlTags(fallbackLines[i], true)));
+                }
             }
 
             XmlAttribute start = xml.CreateAttribute("begin");
