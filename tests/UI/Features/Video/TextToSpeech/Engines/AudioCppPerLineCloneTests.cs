@@ -65,14 +65,18 @@ public class AudioCppPerLineCloneTests
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
-    public void FishWithoutATranscriptFallsBackInsteadOfCloning(string? transcript)
+    public void FishWithoutATranscriptStillClones(string? transcript)
     {
-        // audio.cpp answers a Fish voice_ref without reference_text with an HTTP 500, and Speak
-        // throws on an empty sidecar - so the clip must not be handed out as a voice.
+        // A per-line clip has no transcript when no original-language subtitle is loaded. That
+        // used to drop the clip (Speak threw on an empty sidecar); now Speak sends a blank
+        // placeholder reference_text instead, which the server accepts and clones from fine -
+        // whereas writing the (translated) line as the transcript made the model replay the
+        // clip instead of speaking the line (#14480). So the clip is a voice.
         using var clips = new TempFolder();
         var clip = clips.WriteClip("line-0009", transcript);
 
-        Assert.Null(PerLineVoiceClone.MakeVoiceForClip(new FishTtsAudioCpp(), clip));
+        Assert.NotNull(PerLineVoiceClone.MakeVoiceForClip(new FishTtsAudioCpp(), clip));
+        Assert.Equal(" ", FishTtsAudioCpp.UnknownReferenceTextPlaceholder);
     }
 
     [Fact]
