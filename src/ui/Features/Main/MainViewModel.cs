@@ -5668,8 +5668,8 @@ public partial class MainViewModel :
     /// SE 4 parity ("guess start"): looks for the silence right before the speech that starts the
     /// selected line and moves the start cue there, snapping to a nearby shot change when there is
     /// one. Raising the volume threshold step by step finds the quietest boundary that still reads
-    /// as silence. Moving the start forward keeps the duration when that would otherwise break the
-    /// minimum duration/maximum CPS rules and there is room before the next line.
+    /// as silence. Moving the start forward stops at the minimum duration/maximum CPS floor, so
+    /// only the start ever moves (#14604; SE 4 shifted the whole line instead).
     /// Every outcome is reported in the status bar (#14596): a silent no-op left "no silence found",
     /// "already at the boundary" and "the shortcut never fired" indistinguishable (#14472, #14555).
     /// </summary>
@@ -5719,7 +5719,6 @@ public partial class MainViewModel :
 
         var gapMs = Se.Settings.General.MinimumBetweenLines.GetMilliseconds();
         var prev = GetPreviousWorkingRow(index);
-        var next = GetNextWorkingRow(index);
         var alreadyAtBoundary = false;
         var lastCandidateMs = double.NaN;
 
@@ -5771,6 +5770,32 @@ public partial class MainViewModel :
                 }
             }
 
+            if (newStartMs > selected.StartTime.TotalMilliseconds)
+            {
+                // Shorten only as far as the minimum duration and maximum CPS allow, like guess
+                // end does. SE 4 moved the whole line instead (end along with the start) when the
+                // shortened line would break a rule, which on long text turned "guess start"
+                // into a shift of the line (#14604).
+                var endMs = selected.EndTime.TotalMilliseconds;
+                var maxStartMs = endMs - minDisplayMs;
+                var maxCps = Se.Settings.General.SubtitleMaximumCharactersPerSeconds;
+                if (maxCps > 0)
+                {
+                    var newStart = TimeSpanExtensions.FromMillisecondsWholeMilliseconds(newStartMs);
+                    var cps = SubtitleTextInfoHelper.GetCharactersPerSecond(selected.Text, newStart, selected.EndTime);
+                    if (cps > maxCps)
+                    {
+                        var characters = cps * (endMs - newStartMs) / TimeCode.BaseUnit;
+                        maxStartMs = Math.Min(maxStartMs, endMs - characters / maxCps * TimeCode.BaseUnit);
+                    }
+                }
+
+                if (newStartMs > maxStartMs)
+                {
+                    newStartMs = Math.Max(maxStartMs, selected.StartTime.TotalMilliseconds);
+                }
+            }
+
             if (Math.Abs(selected.StartTime.TotalMilliseconds - newStartMs) < 10)
             {
                 // The boundary at this threshold is where the cue already is. SE 4 stopped here,
@@ -5791,28 +5816,8 @@ public partial class MainViewModel :
                 continue;
             }
 
-            var durationMs = selected.EndTime.TotalMilliseconds - selected.StartTime.TotalMilliseconds;
-            var newEndMs = selected.EndTime.TotalMilliseconds;
-            if (newStartMs > selected.StartTime.TotalMilliseconds)
-            {
-                var newStart = TimeSpanExtensions.FromMillisecondsWholeMilliseconds(newStartMs);
-                var newCps = SubtitleTextInfoHelper.GetCharactersPerSecond(selected.Text, newStart, selected.EndTime);
-                if (newEndMs - newStartMs < minDisplayMs ||
-                    newCps > Se.Settings.General.SubtitleMaximumCharactersPerSeconds)
-                {
-                    // Shortening the line would break the rules, so move it instead - but only
-                    // when the next line is far enough away to take the whole duration.
-                    if (next == null || next.StartTime.TotalMilliseconds > newStartMs + durationMs + gapMs)
-                    {
-                        newEndMs = newStartMs + durationMs;
-                    }
-                }
-            }
-
             var movedMs = newStartMs - selected.StartTime.TotalMilliseconds;
-            selected.SetTimes(
-                TimeSpanExtensions.FromMillisecondsWholeMilliseconds(newStartMs),
-                TimeSpanExtensions.FromMillisecondsWholeMilliseconds(newEndMs));
+            selected.StartTime = TimeSpanExtensions.FromMillisecondsWholeMilliseconds(newStartMs);
 
             _updateAudioVisualizer = true;
             ShowStatus(string.Format(Se.Language.Main.Waveform.GuessStartMovedLineXByYMs, selected.Number, FormatSignedMs(movedMs)));
