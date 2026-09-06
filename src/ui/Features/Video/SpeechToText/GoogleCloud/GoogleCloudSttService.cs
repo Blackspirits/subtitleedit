@@ -24,6 +24,12 @@ public class GoogleCloudSttSettings
     public string Model { get; set; } = "chirp_3";
     public string Language { get; set; } = string.Empty;
     public string BucketName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Only needed when the credential does not carry a project. A service account key
+    /// always does; Application Default Credentials from "gcloud auth" often do not.
+    /// </summary>
+    public string ProjectId { get; set; } = string.Empty;
     public int TimeoutSeconds { get; set; } = 3600;
     public bool DynamicBatching { get; set; } = true;
     public Action<string>? Logger { get; set; }
@@ -35,6 +41,7 @@ public class GoogleCloudSttSettings
         Model = Se.Settings.Tools.GoogleCloudSttModel,
         Language = Se.Settings.Tools.GoogleCloudSttLanguage,
         BucketName = Se.Settings.Tools.GoogleCloudSttBucketName,
+        ProjectId = Se.Settings.Tools.GoogleCloudSttProjectId,
         TimeoutSeconds = Se.Settings.Tools.GoogleCloudSttTimeoutSeconds,
         DynamicBatching = Se.Settings.Tools.GoogleCloudSttDynamicBatching,
         Logger = message => Se.WriteToolsLog(message),
@@ -102,12 +109,23 @@ public class GoogleCloudSttService : ISttTranscriber
 
         try
         {
-            var projectId = ReadProjectId(_settings.KeyFile);
-            // The key file is a service account key (ReadProjectId reads its project_id), so
-            // ask for that type explicitly. The untyped GoogleCredential.FromFileAsync is
-            // deprecated because it will build whatever credential type the file declares.
-            var serviceAccount = await CredentialFactory.FromFileAsync<ServiceAccountCredential>(_settings.KeyFile, ct);
-            _credential = serviceAccount.ToGoogleCredential().CreateScoped(Scope);
+            var projectId = ResolveProjectId(_settings);
+
+            // A service account key is not the only way in, and in many organisations it is
+            // not an available one: creating keys is commonly blocked by the
+            // constraints/iam.disableServiceAccountKeyCreation org policy, and issuing one
+            // needs a role most users of this feature will not hold. When no key file is
+            // configured, fall back to Application Default Credentials, which "gcloud auth
+            // application-default login" writes and which every Google client library
+            // already understands.
+            //
+            // With a key file, ask for the service account type explicitly: the untyped
+            // GoogleCredential.FromFileAsync is deprecated because it will build whatever
+            // credential type the file happens to declare.
+            _credential = (string.IsNullOrWhiteSpace(_settings.KeyFile)
+                ? await GoogleCredential.GetApplicationDefaultAsync(ct)
+                : (await CredentialFactory.FromFileAsync<ServiceAccountCredential>(_settings.KeyFile, ct)).ToGoogleCredential())
+                .CreateScoped(Scope);
 
             var bucket = string.IsNullOrWhiteSpace(_settings.BucketName) ? DeriveBucketName(projectId) : _settings.BucketName.Trim();
             await EnsureBucketAsync(projectId, bucket, ct);
@@ -289,6 +307,40 @@ public class GoogleCloudSttService : ISttTranscriber
         }
     }
 
+    /// <summary>
+    /// Finds the project to bill and to create the bucket in, from whichever source has it.
+    /// A service account key always carries "project_id"; Application Default Credentials
+    /// usually carry only "quota_project_id", and sometimes neither.
+    /// </summary>
+    internal static string ResolveProjectId(GoogleCloudSttSettings settings)
+    {
+        if (!string.IsNullOrWhiteSpace(settings.ProjectId))
+        {
+            return settings.ProjectId.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(settings.KeyFile))
+        {
+            return ReadProjectId(settings.KeyFile);
+        }
+
+        foreach (var candidate in new[]
+                 {
+                     Environment.GetEnvironmentVariable("GOOGLE_CLOUD_PROJECT"),
+                     Environment.GetEnvironmentVariable("GCLOUD_PROJECT"),
+                     ReadProjectIdFromApplicationDefaultCredentials(),
+                 })
+        {
+            if (!string.IsNullOrWhiteSpace(candidate))
+            {
+                return candidate!;
+            }
+        }
+
+        throw new HttpRequestException(
+            "No Google Cloud project could be determined. Either pick a service account key file, which carries its own project, or set GoogleCloudSttProjectId in Settings.json.");
+    }
+
     internal static string ReadProjectId(string keyFile)
     {
         using var doc = JsonDocument.Parse(File.ReadAllText(keyFile));
@@ -298,6 +350,70 @@ public class GoogleCloudSttService : ISttTranscriber
         }
 
         throw new HttpRequestException("The key file is not a Google Cloud service account key (no project_id). In the Google Cloud console create a service account key of type JSON.");
+    }
+
+    /// <summary>
+    /// True when Application Default Credentials are available, so the engine can run with
+    /// no key file. Written by "gcloud auth application-default login", or pointed at by
+    /// GOOGLE_APPLICATION_CREDENTIALS.
+    /// </summary>
+    public static bool HasApplicationDefaultCredentials()
+    {
+        return !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("GOOGLE_APPLICATION_CREDENTIALS"))
+               || File.Exists(GetApplicationDefaultCredentialsPath());
+    }
+
+    /// <summary>The well known file that "gcloud auth application-default login" writes.</summary>
+    private static string GetApplicationDefaultCredentialsPath()
+    {
+        return OperatingSystem.IsWindows()
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "gcloud", "application_default_credentials.json")
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "gcloud", "application_default_credentials.json");
+    }
+
+    /// <summary>
+    /// Reads the project out of the Application Default Credentials: first the file named by
+    /// GOOGLE_APPLICATION_CREDENTIALS (a service account key carries "project_id"), then the
+    /// well known gcloud file, which stores it as "quota_project_id".
+    /// </summary>
+    private static string? ReadProjectIdFromApplicationDefaultCredentials()
+    {
+        foreach (var path in new[] { Environment.GetEnvironmentVariable("GOOGLE_APPLICATION_CREDENTIALS"), GetApplicationDefaultCredentialsPath() })
+        {
+            var projectId = TryReadProjectIdFromJsonFile(path);
+            if (!string.IsNullOrWhiteSpace(projectId))
+            {
+                return projectId;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? TryReadProjectIdFromJsonFile(string? path)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                return null;
+            }
+
+            using var doc = JsonDocument.Parse(File.ReadAllText(path));
+            foreach (var name in new[] { "project_id", "quota_project_id" })
+            {
+                if (doc.RootElement.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String)
+                {
+                    return value.GetString();
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // Unreadable or malformed; the caller still has other sources and a clear error.
+        }
+
+        return null;
     }
 
     private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string url, HttpContent? content, CancellationToken ct)
@@ -326,9 +442,23 @@ public class GoogleCloudSttService : ISttTranscriber
 
     private async Task EnsureBucketAsync(string projectId, string bucket, CancellationToken ct)
     {
+        var namedByUser = !string.IsNullOrWhiteSpace(_settings.BucketName);
+
         using var probe = await SendAsync(HttpMethod.Get, $"{StorageApi}/b/{bucket}", null, ct);
         if (probe.StatusCode != HttpStatusCode.NotFound)
         {
+            // Reading bucket metadata needs storage.buckets.get, which object level roles
+            // such as Storage Object Admin do not include. A user handed a ready made
+            // bucket by an administrator can upload and delete objects in it perfectly
+            // well, and should not be stopped by a metadata check they were never meant to
+            // pass. Only trust that when they named the bucket themselves; a 403 on a
+            // bucket this code derived is a genuine configuration problem.
+            if (probe.StatusCode == HttpStatusCode.Forbidden && namedByUser)
+            {
+                _settings.Logger?.Invoke($"Google Cloud: cannot read metadata for bucket {bucket}, assuming it exists and continuing");
+                return;
+            }
+
             if (!probe.IsSuccessStatusCode)
             {
                 throw new HttpRequestException($"Google Cloud bucket check failed ({(int)probe.StatusCode}). Response: {await probe.Content.ReadAsStringAsync(ct)}");

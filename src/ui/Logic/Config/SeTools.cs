@@ -165,6 +165,12 @@ public class SeTools
     public string GoogleCloudSttModel { get; set; } = "chirp_3";
     public string GoogleCloudSttLanguage { get; set; } = string.Empty;
     public string GoogleCloudSttBucketName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Only needed when signing in with Application Default Credentials, which usually do
+    /// not name a project. A service account key carries its own and this stays empty.
+    /// </summary>
+    public string GoogleCloudSttProjectId { get; set; } = string.Empty;
     public int GoogleCloudSttTimeoutSeconds { get; set; } = 3600;
 
     /// <summary>
