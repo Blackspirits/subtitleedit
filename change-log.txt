@@ -3,6 +3,29 @@ Subtitle Edit Changelog
 
 -----------------------------------------------------------------------------------------------------
 
+v5.2.0-rc4 (6th of September 2026)
+
+* Add Google Cloud Speech-to-Text v2 as an online speech-to-text engine (lossless audio, dynamic batching, word-timed cues) - thx muaz978
+* Add "Video resolution..." to the image-based subtitle editor (Tools menu), scaling images and positions like BDSup2Sub
+* Add per-line voice cloning to VibeVoice, MOSS-TTS, CosyVoice3 and VoxCPM2 (Crisp ASR) - thx invio-a11y
+* Add Spanish (Mexico), (Argentina) and (Latin America / US) spell check dictionaries
+* Add keyboard navigation between changes in Beautify time codes
+* Add live progress, elapsed time and estimate for WhisperX speech-to-text
+* Show a drop-target bar while dragging text in the subtitle text boxes
+* Make the OK button the default in dialogs so Enter accepts them (e.g. Multiple replace) - thx rRobis
+* Fix short durations: also run after split/merge, and always extend the duration - thx andor1999
+* Generate blank video: theme-aware, larger time code with a contrast box, and no window resizing while generating
+* Burn-in: smaller fixed-height preview player without empty bands around the video
+* Fix "guess start/end from waveform" not working on quiet audio - thx m0ck69
+* Fix text drag-and-drop shrinking the selection, and space the drop like SE4 - thx ruonghieu
+* Fix undocked windows staying above other applications that took the foreground - thx cvrle77
+* Fix Higgs Audio v3 voice clone hiss at the end of clips - thx invio-a11y
+* Remove the Vietnamese Parakeet model from Crisp ASR speech to text (quality too poor) - thx ruonghieu
+* Update Chinese (Simplified) translation - thx emsb8888-prog
+* Update Italian translation - thx bovirus
+
+-----------------------------------------------------------------------------------------------------
+
 v5.2.0-rc3 (5th of September 2026)
 
 * Add text drag-and-drop in the subtitle text boxes (e.g. from original to working text) - thx bichitoxxx
