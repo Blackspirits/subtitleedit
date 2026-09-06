@@ -1469,10 +1469,11 @@ namespace Nikse.SubtitleEdit.Core.Common
             if (File.Exists(userWordListXmlFileName))
             {
                 userWordDictionary.Load(userWordListXmlFileName);
+                var seen = new HashSet<string>(); // List.Contains per word was quadratic in the user dictionary
                 foreach (XmlNode node in userWordDictionary.DocumentElement.SelectNodes("word"))
                 {
                     string s = NormalizeUserDictionaryWord(node.InnerText);
-                    if (s.Length > 0 && !userWordList.Contains(s))
+                    if (s.Length > 0 && seen.Add(s))
                     {
                         userWordList.Add(s);
                     }
@@ -3593,19 +3594,23 @@ namespace Nikse.SubtitleEdit.Core.Common
             "複製",       // zh-TW - Traditional Chinese
         };
 
+        // CopyWords is constant, but the ~400-char alternation was escaped, joined and
+        // interpolated (twice per loop) on every call - once per candidate file in a folder scan.
+        private static readonly Regex CopySuffixRegex = new Regex($@"(\s*[-_]?\s*({string.Join("|", CopyWords.Select(Regex.Escape))})(?:\s*\(\d+\))?)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex NumberSuffixRegex = new Regex(@"\s*\(\d+\)$", RegexOptions.Compiled);
+
         public static string GetLenientPathAndFileNameWithoutExtension(string fileName)
         {
             var strictName = GetPathAndFileNameWithoutExtension(fileName);
-            var copyPattern = string.Join("|", CopyWords.Select(Regex.Escape));
 
             // Remove common suffixes like " - Copy", " - Copy (2)"
-            while (Regex.IsMatch(strictName, $@"(\s*[-_]?\s*({copyPattern})(?:\s*\(\d+\))?)$", RegexOptions.IgnoreCase))
+            while (CopySuffixRegex.IsMatch(strictName))
             {
-                strictName = Regex.Replace(strictName, $@"(\s*[-_]?\s*({copyPattern})(?:\s*\(\d+\))?)$", "", RegexOptions.IgnoreCase);
+                strictName = CopySuffixRegex.Replace(strictName, "");
             }
 
             // Remove common suffixes like "(2)", "(3)", etc.
-            strictName = Regex.Replace(strictName, @"\s*\(\d+\)$", "");
+            strictName = NumberSuffixRegex.Replace(strictName, "");
 
             return strictName;
         }
