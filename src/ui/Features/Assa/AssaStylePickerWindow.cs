@@ -51,6 +51,7 @@ public class AssaStylePickerWindow : Window
         var labelFontsAndImages = UiUtil.MakeLabel(Se.Language.General.Styles);
 
         var buttonImport = UiUtil.MakeButton(string.Empty, vm.OkCommand).WithBindContent(nameof(vm.ButtonAcceptText));
+        buttonImport.IsDefault = true; // the dialog's accept button - Enter runs it (#14586)
         var buttonCancel = UiUtil.MakeButtonCancel(vm.CancelCommand);
         var panelButtons = UiUtil.MakeButtonBar(buttonImport, buttonCancel);
 

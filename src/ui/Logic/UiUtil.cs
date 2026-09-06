@@ -518,14 +518,28 @@ public static class UiUtil
         return button;
     }
 
+    /// <summary>
+    /// The dialog's accept button. <see cref="Button.IsDefault"/> makes it click on an unhandled
+    /// Enter anywhere in the window - the role WinForms' AcceptButton had in Subtitle Edit 4.
+    /// Initial focus deliberately does not land on this button (a focused button also clicks on
+    /// bare Space, see <see cref="FocusOnFirstActivation"/>), so without this Enter would reach OK
+    /// only after tabbing to it (#14586). Controls that give Enter their own meaning - a multi-line
+    /// TextBox, an open ComboBox, a focused Cancel button - mark the key handled first and win.
+    /// A window key handler that runs OK on Enter itself must also set Handled, or OK runs twice
+    /// (InitialFocusConventionTests checks that).
+    /// </summary>
     public static Button MakeButtonOk(IRelayCommand? command)
     {
-        return MakeButton(Se.Language.General.Ok, command);
+        var button = MakeButton(Se.Language.General.Ok, command);
+        button.IsDefault = true;
+        return button;
     }
 
     public static Button MakeButtonDone(IRelayCommand? command)
     {
-        return MakeButton(Se.Language.General.Done, command);
+        var button = MakeButton(Se.Language.General.Done, command);
+        button.IsDefault = true;
+        return button;
     }
 
     public static Button MakeButtonCancel(IRelayCommand? command)
