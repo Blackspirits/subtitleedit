@@ -22343,9 +22343,17 @@ public partial class MainViewModel :
 
             if (subtitle == null)
             {
-                // Offer the plain text importer right here: SE4 users drop unsynced .txt lyrics
-                // onto the window and expect them in the grid without a trip through the
-                // File menu (issue #14605).
+                // A .txt that no format and not even the generic importer could read is prose or
+                // lyrics: go straight to the plain text importer, as SE4 did (issue #14605).
+                if (string.Equals(ext, ".txt", StringComparison.OrdinalIgnoreCase) && FileUtil.IsPlainText(fileName))
+                {
+                    await ImportPlainTextFromFile(fileName, skipLoadVideo);
+                    return;
+                }
+
+                // Otherwise offer the importer on the prompt: users drop unsynced lyrics with
+                // other extensions too and expect them in the grid without a trip through
+                // the File menu.
                 var message = Se.Language.General.UnknownSubtitleFormat;
                 var answer = await MessageBox.Show(Window!, Se.Language.General.Error, message, MessageBoxButtons.OK, MessageBoxIcon.Error,
                     custom1: Se.Language.File.Import.TitleImportPlainText);
