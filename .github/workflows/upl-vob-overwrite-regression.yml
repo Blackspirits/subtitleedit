@@ -34,12 +34,12 @@ jobs:
       - name: Full solution tests
         run: dotnet test SubtitleEdit.sln
 
-      - name: Commit verified patch
+      - name: Publish tested patch commit
         run: |
           git config user.name 'BlackSpirits'
           git config user.email 'blackspirits@gmail.com'
           git add src/seconv/Core/VobSubExtractor.cs src/seconv/Core/SubtitleConverter.cs tests/seconv/Core/VobSubExtractorTest.cs
           if ! git diff --cached --quiet; then
             git commit -m 'Protect multi-stream VOB outputs from accidental overwrite'
-            git push origin HEAD:upl/fix-vob-overwrite-work
+            git push origin HEAD:upl/fix-vob-overwrite-tested
           fi
