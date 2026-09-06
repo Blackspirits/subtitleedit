@@ -1,0 +1,45 @@
+name: UPL VOB overwrite regression
+
+on:
+  push:
+    branches:
+      - upl/fix-vob-overwrite-work
+  pull_request:
+    branches:
+      - upl/upstream-main-05cd5a7
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    if: github.ref_name == 'upl/fix-vob-overwrite-work' || github.head_ref == 'upl/fix-vob-overwrite-work'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: upl/fix-vob-overwrite-work
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Apply minimal overwrite fix and regression
+        run: python .github/scripts/upl_vob_overwrite_patch.py
+
+      - name: Targeted regression tests
+        run: dotnet test tests/seconv/SeConvTests.csproj --filter VobSubExtractorTest
+
+      - name: Full solution tests
+        run: dotnet test SubtitleEdit.sln
+
+      - name: Publish tested patch commit
+        run: |
+          git config user.name 'BlackSpirits'
+          git config user.email 'blackspirits@gmail.com'
+          git add src/seconv/Core/VobSubExtractor.cs src/seconv/Core/SubtitleConverter.cs tests/seconv/Core/VobSubExtractorTest.cs
+          if ! git diff --cached --quiet; then
+            git commit -m 'Protect multi-stream VOB outputs from accidental overwrite'
+            git push origin HEAD:upl/fix-vob-overwrite-tested
+          fi
