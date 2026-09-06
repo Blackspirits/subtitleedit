@@ -37,8 +37,10 @@ public class GoogleCloudSttEngine : IOnlineSttEngine
         // No key file is fine when the machine already has Application Default Credentials,
         // which is often the only route available: creating a service account key is
         // commonly blocked by org policy.
-        var hasKeyFile = !string.IsNullOrWhiteSpace(settings.KeyFile) && File.Exists(settings.KeyFile);
-        if (!hasKeyFile && !GoogleCloudSttService.HasApplicationDefaultCredentials())
+        // A configured key file must exist though: the service uses it whenever one is set,
+        // so a stale path would otherwise fail at transcription time instead of here.
+        var hasKeyFile = !string.IsNullOrWhiteSpace(settings.KeyFile);
+        if (hasKeyFile ? !File.Exists(settings.KeyFile) : !GoogleCloudSttService.HasApplicationDefaultCredentials())
         {
             configErrorMessage = Se.Language.General.OnlineSttApiKeyMissing;
             return null;

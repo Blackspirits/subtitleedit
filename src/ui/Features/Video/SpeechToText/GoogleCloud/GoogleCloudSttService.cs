@@ -359,34 +359,48 @@ public class GoogleCloudSttService : ISttTranscriber
     /// </summary>
     public static bool HasApplicationDefaultCredentials()
     {
-        if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("GOOGLE_APPLICATION_CREDENTIALS")))
-        {
-            return true;
-        }
-
-        var path = OperatingSystem.IsWindows()
-            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "gcloud", "application_default_credentials.json")
-            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "gcloud", "application_default_credentials.json");
-
-        return File.Exists(path);
+        return !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("GOOGLE_APPLICATION_CREDENTIALS"))
+               || File.Exists(GetApplicationDefaultCredentialsPath());
     }
 
-    /// <summary>Reads the project out of the well known ADC file, which stores it as "quota_project_id".</summary>
+    /// <summary>The well known file that "gcloud auth application-default login" writes.</summary>
+    private static string GetApplicationDefaultCredentialsPath()
+    {
+        return OperatingSystem.IsWindows()
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "gcloud", "application_default_credentials.json")
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "gcloud", "application_default_credentials.json");
+    }
+
+    /// <summary>
+    /// Reads the project out of the Application Default Credentials: first the file named by
+    /// GOOGLE_APPLICATION_CREDENTIALS (a service account key carries "project_id"), then the
+    /// well known gcloud file, which stores it as "quota_project_id".
+    /// </summary>
     private static string? ReadProjectIdFromApplicationDefaultCredentials()
+    {
+        foreach (var path in new[] { Environment.GetEnvironmentVariable("GOOGLE_APPLICATION_CREDENTIALS"), GetApplicationDefaultCredentialsPath() })
+        {
+            var projectId = TryReadProjectIdFromJsonFile(path);
+            if (!string.IsNullOrWhiteSpace(projectId))
+            {
+                return projectId;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? TryReadProjectIdFromJsonFile(string? path)
     {
         try
         {
-            var path = OperatingSystem.IsWindows()
-                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "gcloud", "application_default_credentials.json")
-                : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "gcloud", "application_default_credentials.json");
-
-            if (!File.Exists(path))
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
             {
                 return null;
             }
 
             using var doc = JsonDocument.Parse(File.ReadAllText(path));
-            foreach (var name in new[] { "quota_project_id", "project_id" })
+            foreach (var name in new[] { "project_id", "quota_project_id" })
             {
                 if (doc.RootElement.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String)
                 {
