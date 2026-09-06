@@ -37,15 +37,17 @@ public class FixCommonErrorsUnfixableErrorsTests : IDisposable
     }
 
     /// <summary>
-    /// A 300 ms line (below the 1000 ms minimum) that starts at zero and is followed immediately
-    /// (within the minimum gap): it cannot be made longer at all, not even partially, and cannot
-    /// be started earlier (it starts at zero), which is the branch that logs "Unable to fix text number...".
+    /// A 300 ms line (below the 1000 ms minimum) that starts at zero and is followed back-to-back
+    /// (next line starts where this one ends, so there is no room whatever the minimum-gap
+    /// setting is - it is static and other tests may change it): it cannot be made longer at all,
+    /// not even partially, and cannot be started earlier (it starts at zero), which is the branch
+    /// that logs "Unable to fix text number...".
     /// </summary>
     private static FixCommonErrorsViewModel BuildViewModelWithUnfixableShortDisplayTime()
     {
         var subtitle = new Subtitle();
         subtitle.Paragraphs.Add(new Paragraph("Hello there", 0, 300));
-        subtitle.Paragraphs.Add(new Paragraph("Goodbye there", 320, 3000));
+        subtitle.Paragraphs.Add(new Paragraph("Goodbye there", 300, 3000));
         subtitle.Renumber();
 
         var vm = new FixCommonErrorsViewModel(new FakeNamesList(), null!, null!);
