@@ -19,8 +19,16 @@ public class FixCommonErrorsUnfixableErrorsTests : IDisposable
     private readonly int _minimumGapMs = Configuration.Settings.General.MinimumMillisecondsBetweenLines;
     private readonly bool _allowMoveStartTime = Configuration.Settings.Tools.FixShortDisplayTimesAllowMoveStartTime;
 
+    private readonly int _analysingMinimumVisibleMs = FixCommonErrorsViewModel.AnalysingMinimumVisibleMilliseconds;
+    private readonly int _analysingPaintDelayMs = FixCommonErrorsViewModel.AnalysingPaintDelayMilliseconds;
+
     public FixCommonErrorsUnfixableErrorsTests()
     {
+        // The scan keeps its "Analysing..." feedback on screen for a quarter second; nothing here
+        // looks at it.
+        FixCommonErrorsViewModel.AnalysingMinimumVisibleMilliseconds = 0;
+        FixCommonErrorsViewModel.AnalysingPaintDelayMilliseconds = 0;
+
         // The rule reads libse's Configuration.Settings, a mirror that any earlier test can have
         // left with other values (a zero minimum gap turns the "unfixable" line below into one
         // that can be extended by 20 ms). Pin what the scenario depends on.
@@ -43,6 +51,8 @@ public class FixCommonErrorsUnfixableErrorsTests : IDisposable
 
     public void Dispose()
     {
+        FixCommonErrorsViewModel.AnalysingMinimumVisibleMilliseconds = _analysingMinimumVisibleMs;
+        FixCommonErrorsViewModel.AnalysingPaintDelayMilliseconds = _analysingPaintDelayMs;
         Se.Settings.Tools.FixCommonErrors.Profiles = _originalProfiles;
         Configuration.Settings.General.SubtitleMinimumDisplayMilliseconds = _minimumDisplayMs;
         Configuration.Settings.General.MinimumMillisecondsBetweenLines = _minimumGapMs;

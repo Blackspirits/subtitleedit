@@ -24863,9 +24863,7 @@ public partial class MainViewModel :
 
     private void CleanUp()
     {
-        _positionTimer.Stop();
-        _cursorTimer?.Stop();
-        _slowTimer.Stop();
+        StopBackgroundWork();
 
         if (_findViewModel != null)
         {
@@ -24973,6 +24971,8 @@ public partial class MainViewModel :
 
     internal void OnLoaded()
     {
+        StartBackgroundWork();
+
         if (OperatingSystem.IsMacOS())
         {
             Layout.InitNativeMacMenu.Sync(this);
@@ -25146,7 +25146,13 @@ public partial class MainViewModel :
 
             await Task.Delay(1000); // delay 1 second (off UI thread)          
 
-            _undoRedoManager.StartChangeDetection();
+            // The window can be gone again within that second (a test host, or a New window
+            // closed at once); StopBackgroundWork has run then and the poll must stay off.
+            if (_positionTimer.IsRunning)
+            {
+                _undoRedoManager.StartChangeDetection();
+            }
+
             _loading = false;
 
             Dispatcher.UIThread.Post(void () =>
@@ -30191,7 +30197,6 @@ public partial class MainViewModel :
                 _avLastScrolling = isAvScrolloing;
             }
         };
-        _positionTimer.Start();
 
         // Dedicated high-frequency cursor timer (~60 fps). It only advances the interpolated
         // playhead and updates the waveform/video cursor position, which is cheap now that the
@@ -30297,7 +30302,6 @@ public partial class MainViewModel :
                 _pausedCenterLastSeconds = est;
             }
         }, DispatcherPriority.Normal);
-        _cursorTimer.Start();
 
         _slowTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
         _slowTimer.Tick += (s, e) =>
@@ -30327,7 +30331,35 @@ public partial class MainViewModel :
 
             TryRefreshVideoPreview();
         };
+    }
+
+    /// <summary>
+    /// Starts the position/cursor/slow timers. Called from <see cref="OnLoaded"/>, not from the
+    /// constructor: a view model without a shown window (File > New window before it is up,
+    /// and every headless test that builds one) has nothing for them to drive, and each
+    /// UiTickPump is a dedicated thread - hundreds of never-stopped 16/50 ms pumps and 400 ms
+    /// hash passes were running on the shared UI thread by the end of a test run.
+    /// </summary>
+    internal void StartBackgroundWork()
+    {
+        _positionTimer.Start();
+        _cursorTimer?.Start();
         _slowTimer.Start();
+    }
+
+    /// <summary>
+    /// Stops the timers and the undo change-detection poll. Runs on <see cref="CleanUp"/> and
+    /// when the host window closes (also without OnClosing, e.g. a test host that detaches the
+    /// save prompt), so an editor window's pumps do not outlive it - the change-detection tick
+    /// in particular does a blocking Dispatcher.Invoke and parked one thread-pool thread per
+    /// closed window for the rest of the process.
+    /// </summary>
+    internal void StopBackgroundWork()
+    {
+        _positionTimer.Stop();
+        _cursorTimer?.Stop();
+        _slowTimer.Stop();
+        _undoRedoManager.StopChangeDetection();
     }
 
     // Preview settle window after the last keystroke. Deliberately shorter than
