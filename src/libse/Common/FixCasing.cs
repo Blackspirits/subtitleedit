@@ -161,6 +161,20 @@ namespace Nikse.SubtitleEdit.Core.Common
 
         private static readonly string[] CasingTitles = { "Mrs.", "Miss.", "Mr.", "Ms.", "Dr." };
         private static readonly string[] CasingNotChangeWords = { "does", "has", "will", "is", "and", "for", "but", "or", "of" };
+        private static readonly char[] TitleWordDelimiters = { ' ', '\r', '\n', ',', '"', '?', '!', '.', '\'' };
+
+        private static bool IsCasingNotChangeWord(ReadOnlySpan<char> word)
+        {
+            foreach (var w in CasingNotChangeWords)
+            {
+                if (word.SequenceEqual(w.AsSpan()))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
 
         private string FixCasingAfterTitles(string input)
         {
@@ -181,8 +195,10 @@ namespace Nikse.SubtitleEdit.Core.Common
                         if (idx < text.Length - 1 && text[idx] == ' ')
                         {
                             idx++;
-                            var words = text.Substring(idx).Split(' ', '\r', '\n', ',', '"', '?', '!', '.', '\'');
-                            if (words.Length > 0 && !CasingNotChangeWords.Contains(words[0]))
+                            // First word only - splitting the whole rest of the line allocated an array per title hit.
+                            var wordEnd = text.IndexOfAny(TitleWordDelimiters, idx);
+                            var firstWord = wordEnd < 0 ? text.AsSpan(idx) : text.AsSpan(idx, wordEnd - idx);
+                            if (!IsCasingNotChangeWord(firstWord))
                             {
                                 var upper = char.ToUpperInvariant(text[idx]).ToString();
                                 text = text.Remove(idx, 1).Insert(idx, upper);
