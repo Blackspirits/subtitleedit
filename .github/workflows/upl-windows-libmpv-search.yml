@@ -23,7 +23,7 @@ jobs:
           git show refs/remotes/origin/upl/fix-windows-libmpv-search-work:.github/scripts/upl_windows_libmpv_search_patch.py > "$RUNNER_TEMP/upl_windows_libmpv_search_patch.py"
           python "$RUNNER_TEMP/upl_windows_libmpv_search_patch.py"
           expected=$'src/ui/Logic/VideoPlayers/LibMpvDynamic/LibMpvDynamicPlayer.cs\ntests/UI/Logic/VideoPlayers/LibMpvLibraryPathTests.cs'
-          actual="$(git diff --name-only HEAD)"
+          actual="$( { git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort )"
           test "$actual" = "$expected" || { echo "Unexpected changed files:"; printf '%s\n' "$actual"; exit 1; }
           git diff --check HEAD
 
@@ -36,7 +36,7 @@ jobs:
         run: dotnet test tests/UI/UITests.csproj --filter "FullyQualifiedName~LibMpv" --logger "trx;LogFileName=libmpv-tests.trx"
 
       - name: Build solution
-        run: dotnet build SubtitleEdit.sln --no-restore
+        run: dotnet build SubtitleEdit.sln
 
       - name: Commit validated patch
         run: |
