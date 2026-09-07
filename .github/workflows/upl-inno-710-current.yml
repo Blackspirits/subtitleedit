@@ -1,0 +1,79 @@
+name: UPL validate Inno 7.1.0 on current upstream
+
+on:
+  push:
+    branches:
+      - upl/inno-7.1.0-current-work
+
+jobs:
+  inno-710-current:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ci/inno-7.1.0-x64-1f894ef
+          fetch-depth: 0
+
+      - name: Apply workflow patch
+        shell: pwsh
+        run: |
+          git fetch origin upl/inno-7.1.0-current-work:refs/remotes/origin/upl/inno-7.1.0-current-work
+          git show refs/remotes/origin/upl/inno-7.1.0-current-work:.github/scripts/upl_inno_710_patch.py > "$env:RUNNER_TEMP\upl_inno_710_patch.py"
+          python "$env:RUNNER_TEMP\upl_inno_710_patch.py"
+          $changed = @(git diff --name-only HEAD)
+          if (($changed -join "`n") -ne '.github/workflows/build-ui.yml') { throw "Unexpected changed files: $($changed -join ', ')" }
+          git diff --check HEAD
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $workflow = Get-Content '.github/workflows/build-ui.yml' -Raw
+          if ($workflow -notmatch 'innosetup-7\.1\.0-x64\.exe') { throw 'Inno 7.1.0 x64 URL missing' }
+          if ($workflow -notmatch '0362a383ed217d4c4239b5933866dd96d3eb2102737da92f80f6057a4b40df2f') { throw 'Expected Inno SHA-256 missing' }
+          if ($workflow -notmatch [regex]::Escape('C:\Program Files\Inno Setup 7\ISCC.exe')) { throw 'Inno 7 x64 ISCC path missing' }
+          if ($workflow -match 'Inno Setup 6\.7\.3') { throw 'Old Inno installer step still present' }
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Publish Windows x64 app
+        shell: pwsh
+        run: |
+          dotnet restore SubtitleEdit.sln
+          dotnet publish src/ui/UI.csproj -c Release -r win-x64 --self-contained false `
+            -p:PublishSingleFile=true `
+            -p:DebugSymbols=false `
+            -p:DebugType=none `
+            -o ./src/ui/bin/Release/net10.0/publish
+
+      - name: Download verified libmpv bundle
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/SubtitleEdit/support-files/releases/download/libmpv-2026-08-14b/libmpv2-win64.zip'
+          $expectedSha256 = 'ce99ee7a9cab0ada2f696b04132def67b0978157d5f4a1a7966d04c92aebbfec'
+          Invoke-WebRequest -Uri $url -OutFile 'libmpv2-64.zip'
+          $actualSha256 = (Get-FileHash 'libmpv2-64.zip' -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualSha256 -ne $expectedSha256) { throw "libmpv ZIP SHA-256 mismatch: expected $expectedSha256, got $actualSha256" }
+          Expand-Archive -Path 'libmpv2-64.zip' -DestinationPath 'libmpv-temp'
+          Copy-Item 'libmpv-temp/libmpv-2.dll' './src/ui/bin/Release/net10.0/publish/'
+
+      - name: Install verified Inno Setup 7.1.0 x64
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/jrsoftware/issrc/releases/download/is-7_1_0/innosetup-7.1.0-x64.exe'
+          $expectedSha256 = '0362a383ed217d4c4239b5933866dd96d3eb2102737da92f80f6057a4b40df2f'
+          $installer = "$env:RUNNER_TEMP\innosetup.exe"
+          Invoke-WebRequest -Uri $url -OutFile $installer
+          $actualSha256 = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualSha256 -ne $expectedSha256) { throw "Inno Setup SHA-256 mismatch: expected $expectedSha256, got $actualSha256" }
+          Start-Process -FilePath $installer -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait
+
+      - name: Compile installer
+        shell: pwsh
+        run: |
+          $iscc = "$env:ProgramFiles\Inno Setup 7\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found at $iscc" }
+          & $iscc 'installer\WindowsInno\Subtitle_Edit_Installer.iss'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $setup = Get-ChildItem 'installer\WindowsInno\SubtitleEdit-*-Setup.exe' | Select-Object -First 1
+          if (-not $setup) { throw 'Installer compile succeeded without producing a setup executable' }
+          Write-Host "Compiled successfully: $($setup.Name)"
