@@ -43,7 +43,8 @@ jobs:
 
       - name: Verify combined call site
         shell: bash
-        run: grep -F "VobSubExtractor.Extract(vobFiles, outputBase, options.VobIsPal, overwrite: options.Overwrite);" src/seconv/Core/SubtitleConverter.cs
+        run: |
+          grep -F "VobSubExtractor.Extract(vobFiles, outputBase, options.VobIsPal, overwrite: options.Overwrite);" src/seconv/Core/SubtitleConverter.cs
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
