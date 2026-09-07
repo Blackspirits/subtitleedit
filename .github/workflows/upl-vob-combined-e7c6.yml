@@ -14,8 +14,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: 2d29d0ca59e81b7a883452436220723ec8d38aa5
+          ref: upl/vob-combined-e7c6-work
           fetch-depth: 0
+
+      - name: Stage deterministic conflict resolver
+        shell: bash
+        run: cp .github/scripts/upl_resolve_vob_ntsc_after_overwrite.py "$RUNNER_TEMP/upl_resolve_vob_ntsc_after_overwrite.py"
 
       - name: Apply NTSC fix on top of overwrite fix
         shell: bash
@@ -23,31 +27,15 @@ jobs:
           set -euo pipefail
           git config user.name 'BlackSpirits'
           git config user.email 'blackspirits@gmail.com'
+          git checkout --detach 2d29d0ca59e81b7a883452436220723ec8d38aa5
           git fetch origin fix/vob-ntsc-standard
           set +e
           git cherry-pick cfd5ef65f6bf8278f6e3b29bda8b076862a2184c
           rc=$?
           set -e
           if [ "$rc" -ne 0 ]; then
-            # The two fixes intentionally touch the same call site in SubtitleConverter.cs.
-            # Keep the overwrite branch's file, then apply only the NTSC semantic delta.
             git checkout HEAD -- src/seconv/Core/SubtitleConverter.cs
-            python - <<'PY'
-          from pathlib import Path
-          p = Path('src/seconv/Core/SubtitleConverter.cs')
-          text = p.read_text(encoding='utf-8-sig')
-          old = '''            // IsPal — there's no single reliable auto-detect from VOB alone (would need
-            // IFO parsing). Default to PAL to match the GUI's batch converter. Future
-            // work: add --vob-pal/--vob-ntsc and/or read VIDEO_TS.IFO.
-            var outputs = VobSubExtractor.Extract(vobFiles, outputBase, isPal: true, overwrite: options.Overwrite);
-'''
-          new = '''            // There is no reliable PAL/NTSC auto-detect from VOB alone without IFO parsing.
-            // Preserve PAL as the default, while allowing the CLI to select NTSC explicitly.
-            var outputs = VobSubExtractor.Extract(vobFiles, outputBase, options.VobIsPal, overwrite: options.Overwrite);
-'''
-          assert text.count(old) == 1, text.count(old)
-          p.write_text(text.replace(old, new), encoding='utf-8')
-          PY
+            python "$RUNNER_TEMP/upl_resolve_vob_ntsc_after_overwrite.py"
             git add src/seconv/Core/SubtitleConverter.cs
             git cherry-pick --continue
           fi
@@ -55,8 +43,7 @@ jobs:
 
       - name: Verify combined call site
         shell: bash
-        run: |
-          grep -F "VobSubExtractor.Extract(vobFiles, outputBase, options.VobIsPal, overwrite: options.Overwrite);" src/seconv/Core/SubtitleConverter.cs
+        run: grep -F "VobSubExtractor.Extract(vobFiles, outputBase, options.VobIsPal, overwrite: options.Overwrite);" src/seconv/Core/SubtitleConverter.cs
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
@@ -71,5 +58,4 @@ jobs:
 
       - name: Publish validated dependent branch
         shell: bash
-        run: |
-          git push origin HEAD:fix/vob-ntsc-after-overwrite-e7c6
+        run: git push origin HEAD:fix/vob-ntsc-after-overwrite-e7c6
