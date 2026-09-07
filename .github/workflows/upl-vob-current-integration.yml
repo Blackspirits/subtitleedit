@@ -14,13 +14,13 @@ jobs:
           ref: 1f894efdf97df1a14f0fc719ca9ec19279581223
           fetch-depth: 0
 
-      - name: Combine current VOB fixes
+      - name: Combine current VOB fixes (NTSC first)
         run: |
           git config user.name 'BlackSpirits'
           git config user.email 'blackspirits@gmail.com'
           git fetch origin fix/vob-multistream-overwrite-current fix/vob-ntsc-standard
-          git cherry-pick 8cbe418f94c0ed4efc4f4cf5fc86a0f1a8b8fad6
           git cherry-pick cfd5ef65f6bf8278f6e3b29bda8b076862a2184c
+          git cherry-pick 8cbe418f94c0ed4efc4f4cf5fc86a0f1a8b8fad6
           git diff --check 1f894efdf97df1a14f0fc719ca9ec19279581223..HEAD
 
       - name: Setup .NET
