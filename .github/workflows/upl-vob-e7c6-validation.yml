@@ -1,0 +1,32 @@
+name: UPL validate VOB overwrite on e7c6
+
+on:
+  push:
+    branches:
+      - upl/vob-e7c6-validation-work
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: fix/vob-multistream-overwrite-e7c6
+          fetch-depth: 0
+
+      - name: Structural diff check
+        run: git diff --check e7c6c1f01040af867cda6251921e18cc84758f1e..HEAD
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Targeted VOB regression tests
+        run: dotnet test tests/seconv/SeConvTests.csproj --filter VobSubExtractorTest
+
+      - name: Full solution tests
+        run: dotnet test SubtitleEdit.sln
