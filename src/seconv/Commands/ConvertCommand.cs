@@ -17,6 +17,17 @@ internal sealed class ConvertCommand : AsyncCommand<ConvertCommand.Settings>
     /// </summary>
     public static string[] RawArgs { get; set; } = [];
 
+    internal static bool ResolveVobIsPal(bool vobPal, bool vobNtsc)
+    {
+        if (vobPal && vobNtsc)
+        {
+            throw new ArgumentException("--vob-pal and --vob-ntsc are mutually exclusive.");
+        }
+
+        // Preserve the existing CLI behaviour unless NTSC is explicitly selected.
+        return !vobNtsc;
+    }
+
     public sealed class Settings : CommandSettings
     {
         [CommandArgument(0, "<pattern>")]
@@ -70,6 +81,14 @@ internal sealed class ConvertCommand : AsyncCommand<ConvertCommand.Settings>
         [CommandOption("--fps")]
         [Description("Frame rate")]
         public double? Fps { get; init; }
+
+        [CommandOption("--vob-pal")]
+        [Description("VOB input: treat DVD video as PAL (720x576; default)")]
+        public bool VobPal { get; init; }
+
+        [CommandOption("--vob-ntsc")]
+        [Description("VOB input: treat DVD video as NTSC (720x480)")]
+        public bool VobNtsc { get; init; }
 
         [CommandOption("--input-folder|--inputfolder")]
         [Description("Input folder name")]
@@ -679,6 +698,16 @@ internal sealed class ConvertCommand : AsyncCommand<ConvertCommand.Settings>
                 return Fail(settings, $"--change-speed must be greater than 0 (got {settings.ChangeSpeed.Value}).");
             }
 
+            bool vobIsPal;
+            try
+            {
+                vobIsPal = ResolveVobIsPal(settings.VobPal, settings.VobNtsc);
+            }
+            catch (ArgumentException ex)
+            {
+                return Fail(settings, ex.Message);
+            }
+
             // Parse offset if supplied
             TimeSpan? offset = null;
             if (!string.IsNullOrWhiteSpace(settings.Offset))
@@ -733,6 +762,7 @@ internal sealed class ConvertCommand : AsyncCommand<ConvertCommand.Settings>
                 InputEncodingFallback = settings.InputEncodingFallback,
                 Fps = settings.Fps,
                 TargetFps = settings.TargetFps,
+                VobIsPal = vobIsPal,
                 Overwrite = settings.Overwrite,
                 KeepTimestamp = settings.KeepTimestamp,
                 Operations = operations,
