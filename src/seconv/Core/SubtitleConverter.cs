@@ -1,4 +1,4 @@
-﻿using Nikse.SubtitleEdit.Core.Common;
+using Nikse.SubtitleEdit.Core.Common;
 using Nikse.SubtitleEdit.Core.SubtitleFormats;
 using Nikse.SubtitleEdit.UiLogic.Export;
 using Nikse.SubtitleEdit.UiLogic.SpellCheck;
@@ -252,24 +252,6 @@ internal class SubtitleConverter
             outputBase = Path.Combine(outputFolder, stem + ".sub");
         }
 
-        // Overwrite check is best-effort against the base path. Multi-stream DVDs land
-        // additional outputs at <stem>.<n>.sub which we can't predict without parsing —
-        // those existing files will be overwritten silently. Acceptable for now since
-        // multi-stream DVDs are rare and the user opted into the batch by passing all VOBs.
-        if (!options.Overwrite)
-        {
-            var pair = new[] { outputBase, Path.ChangeExtension(outputBase, ".idx") };
-            foreach (var p in pair)
-            {
-                if (File.Exists(p))
-                {
-                    result.Errors.Add($"Output file already exists: {p}. Pass --overwrite to replace it.");
-                    result.FailedFiles = vobFiles.Count;
-                    return result;
-                }
-            }
-        }
-
         if (!options.Quiet)
         {
             var label = vobFiles.Count == 1
@@ -283,7 +265,7 @@ internal class SubtitleConverter
             // IsPal — there's no single reliable auto-detect from VOB alone (would need
             // IFO parsing). Default to PAL to match the GUI's batch converter. Future
             // work: add --vob-pal/--vob-ntsc and/or read VIDEO_TS.IFO.
-            var outputs = VobSubExtractor.Extract(vobFiles, outputBase, isPal: true);
+            var outputs = VobSubExtractor.Extract(vobFiles, outputBase, isPal: true, overwrite: options.Overwrite);
             result.SuccessfulFiles = vobFiles.Count;
             // Report the first stream's output path against each input VOB. With multiple
             // streams there's no clean 1:1 mapping back to inputs, but the OutputFile slot
