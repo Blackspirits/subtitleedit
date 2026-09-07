@@ -1,0 +1,35 @@
+name: UPL VOB current fixes integration smoke
+
+on:
+  push:
+    branches:
+      - upl/vob-current-integration-smoke
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: 1f894efdf97df1a14f0fc719ca9ec19279581223
+          fetch-depth: 0
+
+      - name: Combine current VOB fixes
+        run: |
+          git config user.name 'BlackSpirits'
+          git config user.email 'blackspirits@gmail.com'
+          git fetch origin fix/vob-multistream-overwrite-current fix/vob-ntsc-standard
+          git cherry-pick 8cbe418f94c0ed4efc4f4cf5fc86a0f1a8b8fad6
+          git cherry-pick cfd5ef65f6bf8278f6e3b29bda8b076862a2184c
+          git diff --check 1f894efdf97df1a14f0fc719ca9ec19279581223..HEAD
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Targeted VOB tests
+        run: dotnet test tests/seconv/SeConvTests.csproj --filter VobSubExtractorTest
+
+      - name: Full solution tests
+        run: dotnet test SubtitleEdit.sln
