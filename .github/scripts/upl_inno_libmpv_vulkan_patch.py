@@ -16,15 +16,8 @@ def replace_once(path: str, old: str, new: str) -> None:
 
 
 replace_once(
-    ".github/workflows/build-ui.yml",
-    '          Copy-Item "libmpv-temp/libmpv-2.dll" "./src/ui/bin/Release/net10.0/publish/"',
-    '          # Keep vulkan-1.dll adjacent to libmpv-2.dll in the Inno staging folder (#13856).\n'
-    '          Copy-Item "libmpv-temp/*" "./src/ui/bin/Release/net10.0/publish/"',
-)
-
-replace_once(
     "installer/WindowsInno/Subtitle_Edit_Installer.iss",
     "Source: {#bindir}\\libmpv-2.dll;          DestDir: {userappdata}\\Subtitle Edit; Flags: ignoreversion",
     "Source: {#bindir}\\libmpv-2.dll;          DestDir: {userappdata}\\Subtitle Edit; Flags: ignoreversion\n"
-    "Source: {#bindir}\\vulkan-1.dll;          DestDir: {userappdata}\\Subtitle Edit; Flags: ignoreversion",
+    "Source: ..\\..\\libmpv-temp\\vulkan-1.dll; DestDir: {userappdata}\\Subtitle Edit; Flags: ignoreversion",
 )
