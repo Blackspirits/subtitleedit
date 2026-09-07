@@ -23,8 +23,8 @@ jobs:
           git checkout refs/remotes/origin/upl/fix-ytdlp-checksum-work -- \
             src/ui/Logic/Download/YtDlpDownloadService.cs \
             tests/UI/Logic/Download/YtDlpDownloadServiceTests.cs
-          test "$(git diff --name-only | sort)" = $'src/ui/Logic/Download/YtDlpDownloadService.cs\ntests/UI/Logic/Download/YtDlpDownloadServiceTests.cs'
-          git diff --check
+          test "$(git diff --name-only HEAD | sort)" = $'src/ui/Logic/Download/YtDlpDownloadService.cs\ntests/UI/Logic/Download/YtDlpDownloadServiceTests.cs'
+          git diff --check HEAD
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
@@ -60,8 +60,8 @@ jobs:
             src/seconv/Core/SubtitleConverter.cs \
             src/seconv/Core/VobSubExtractor.cs \
             tests/seconv/Core/VobSubExtractorTest.cs
-          test "$(git diff --name-only | sort)" = $'src/seconv/Core/SubtitleConverter.cs\nsrc/seconv/Core/VobSubExtractor.cs\ntests/seconv/Core/VobSubExtractorTest.cs'
-          git diff --check
+          test "$(git diff --name-only HEAD | sort)" = $'src/seconv/Core/SubtitleConverter.cs\nsrc/seconv/Core/VobSubExtractor.cs\ntests/seconv/Core/VobSubExtractorTest.cs'
+          git diff --check HEAD
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
@@ -103,8 +103,8 @@ jobs:
           assert s.count(old) == 1, s.count(old)
           p.write_text(s.replace(old, new), encoding='utf-8')
           PY
-          test "$(git diff --name-only)" = 'src/ui/Assets/Languages/Portuguese.json'
-          git diff --check
+          test "$(git diff --name-only HEAD)" = 'src/ui/Assets/Languages/Portuguese.json'
+          git diff --check HEAD
 
       - name: Translation structural QA
         run: |
@@ -178,9 +178,9 @@ jobs:
         run: |
           git fetch origin "ci/inno-7.1.0-x64-current:refs/remotes/origin/ci/inno-7.1.0-x64-current"
           git checkout "refs/remotes/origin/ci/inno-7.1.0-x64-current" -- .github/workflows/build-ui.yml
-          $changed = (git diff --name-only).Trim()
+          $changed = (git diff --name-only HEAD).Trim()
           if ($changed -ne '.github/workflows/build-ui.yml') { throw "Unexpected changed files: $changed" }
-          git diff --check
+          git diff --check HEAD
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Setup .NET
