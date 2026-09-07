@@ -1,0 +1,98 @@
+name: UPL validate Inno libmpv Vulkan bundling
+
+on:
+  push:
+    branches:
+      - upl/fix-inno-libmpv-vulkan-work
+
+permissions:
+  contents: write
+
+jobs:
+  inno-libmpv-vulkan:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: fix/inno-libmpv-vulkan
+          fetch-depth: 0
+
+      - name: Apply minimal packaging patch
+        shell: pwsh
+        run: |
+          git fetch origin upl/fix-inno-libmpv-vulkan-work:refs/remotes/origin/upl/fix-inno-libmpv-vulkan-work
+          git show refs/remotes/origin/upl/fix-inno-libmpv-vulkan-work:.github/scripts/upl_inno_libmpv_vulkan_patch.py > "$env:RUNNER_TEMP\upl_inno_libmpv_vulkan_patch.py"
+          python "$env:RUNNER_TEMP\upl_inno_libmpv_vulkan_patch.py"
+          $expected = @('.github/workflows/build-ui.yml', 'installer/WindowsInno/Subtitle_Edit_Installer.iss') | Sort-Object
+          $actual = @(git diff --name-only HEAD | Sort-Object)
+          if (($actual -join "`n") -ne ($expected -join "`n")) { throw "Unexpected changed files: $($actual -join ', ')" }
+          git diff --check HEAD
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Structural regression assertions
+        shell: pwsh
+        run: |
+          $workflow = Get-Content '.github/workflows/build-ui.yml' -Raw
+          $iss = Get-Content 'installer/WindowsInno/Subtitle_Edit_Installer.iss' -Raw
+          if ($workflow -notmatch [regex]::Escape('Copy-Item "libmpv-temp/*" "./src/ui/bin/Release/net10.0/publish/"')) { throw 'Inno staging still drops libmpv companion files' }
+          if ($iss -notmatch [regex]::Escape('Source: {#bindir}\vulkan-1.dll;          DestDir: {userappdata}\Subtitle Edit; Flags: ignoreversion')) { throw 'Installer does not package vulkan-1.dll next to libmpv-2.dll' }
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Download verified libmpv bundle
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/SubtitleEdit/support-files/releases/download/libmpv-2026-08-14b/libmpv2-win64.zip'
+          $expectedSha256 = 'ce99ee7a9cab0ada2f696b04132def67b0978157d5f4a1a7966d04c92aebbfec'
+          Invoke-WebRequest -Uri $url -OutFile 'libmpv2-64.zip'
+          $actualSha256 = (Get-FileHash 'libmpv2-64.zip' -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualSha256 -ne $expectedSha256) { throw "libmpv ZIP SHA-256 mismatch: expected $expectedSha256, got $actualSha256" }
+          Expand-Archive -Path 'libmpv2-64.zip' -DestinationPath 'libmpv-temp'
+          if (-not (Test-Path 'libmpv-temp/libmpv-2.dll')) { throw 'Verified bundle is missing libmpv-2.dll' }
+          if (-not (Test-Path 'libmpv-temp/vulkan-1.dll')) { throw 'Verified bundle is missing vulkan-1.dll' }
+
+      - name: Publish Windows x64 app for Inno
+        shell: pwsh
+        run: |
+          dotnet publish src/ui/UI.csproj -c Release -r win-x64 --self-contained false `
+            -p:PublishSingleFile=true `
+            -p:DebugSymbols=false `
+            -p:DebugType=none `
+            -o ./src/ui/bin/Release/net10.0/publish
+          Copy-Item 'libmpv-temp/*' './src/ui/bin/Release/net10.0/publish/'
+          if (-not (Test-Path './src/ui/bin/Release/net10.0/publish/libmpv-2.dll')) { throw 'Inno staging is missing libmpv-2.dll' }
+          if (-not (Test-Path './src/ui/bin/Release/net10.0/publish/vulkan-1.dll')) { throw 'Inno staging is missing vulkan-1.dll' }
+
+      - name: Install verified Inno Setup 7.1.0 x64
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/jrsoftware/issrc/releases/download/is-7_1_0/innosetup-7.1.0-x64.exe'
+          $expectedSha256 = '0362a383ed217d4c4239b5933866dd96d3eb2102737da92f80f6057a4b40df2f'
+          $installer = "$env:RUNNER_TEMP\innosetup.exe"
+          Invoke-WebRequest -Uri $url -OutFile $installer
+          $actualSha256 = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualSha256 -ne $expectedSha256) { throw "Inno Setup SHA-256 mismatch: expected $expectedSha256, got $actualSha256" }
+          Start-Process -FilePath $installer -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait
+
+      - name: Compile installer
+        shell: pwsh
+        run: |
+          $iscc = "$env:ProgramFiles\Inno Setup 7\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found at $iscc" }
+          & $iscc 'installer\WindowsInno\Subtitle_Edit_Installer.iss'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $setup = Get-ChildItem 'installer\WindowsInno\SubtitleEdit-*-Setup.exe' | Select-Object -First 1
+          if (-not $setup) { throw 'Installer compile succeeded without producing a setup executable' }
+          Write-Host "Compiled successfully: $($setup.Name)"
+
+      - name: Commit clean patch
+        shell: pwsh
+        run: |
+          git config user.name 'BlackSpirits'
+          git config user.email 'blackspirits@gmail.com'
+          git add .github/workflows/build-ui.yml installer/WindowsInno/Subtitle_Edit_Installer.iss
+          git commit -m 'Keep Vulkan loader in Inno libmpv bundle'
+          git push origin HEAD:fix/inno-libmpv-vulkan
