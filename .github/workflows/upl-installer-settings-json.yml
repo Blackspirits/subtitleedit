@@ -20,37 +20,11 @@ jobs:
       - name: Apply minimal installer settings patch
         shell: pwsh
         run: |
-          $path = 'installer/WindowsInno/Subtitle_Edit_Installer.iss'
-          $text = Get-Content $path -Raw -Encoding UTF8
-
-          $oldDelete = 'Type: files; Name: {userappdata}\Subtitle Edit\Settings.xml; Tasks: reset_settings'
-          $newDelete = @'
-Type: files; Name: {userappdata}\Subtitle Edit\Settings.json; Tasks: reset_settings
-Type: files; Name: {userappdata}\Subtitle Edit\Settings.xml;  Tasks: reset_settings
-'@.Trim()
-          if (($text.Split($oldDelete).Count - 1) -ne 1) { throw 'Unexpected Settings.xml reset anchor count' }
-          $text = $text.Replace($oldDelete, $newDelete)
-
-          $oldExist = @'
-function SettingsExist(): Boolean;
-begin
-  Result := FileExists(ExpandConstant('{userappdata}\Subtitle Edit\Settings.xml'));
-end;
-'@
-          $newExist = @'
-function SettingsExist(): Boolean;
-begin
-  Result :=
-    FileExists(ExpandConstant('{userappdata}\Subtitle Edit\Settings.json')) or
-    FileExists(ExpandConstant('{userappdata}\Subtitle Edit\Settings.xml'));
-end;
-'@
-          if (($text.Split($oldExist).Count - 1) -ne 1) { throw 'Unexpected SettingsExist anchor count' }
-          $text = $text.Replace($oldExist, $newExist)
-          Set-Content $path -Value $text -Encoding UTF8 -NoNewline
-
+          git fetch origin "upl/fix-installer-settings-work:refs/remotes/origin/upl/fix-installer-settings-work"
+          git show "refs/remotes/origin/upl/fix-installer-settings-work:.github/scripts/upl_installer_settings_patch.py" | Out-File "$env:RUNNER_TEMP\upl_installer_settings_patch.py" -Encoding utf8
+          python "$env:RUNNER_TEMP\upl_installer_settings_patch.py"
           $changed = (git diff --name-only HEAD).Trim()
-          if ($changed -ne $path) { throw "Unexpected changed files: $changed" }
+          if ($changed -ne 'installer/WindowsInno/Subtitle_Edit_Installer.iss') { throw "Unexpected changed files: $changed" }
           git diff --check HEAD
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
