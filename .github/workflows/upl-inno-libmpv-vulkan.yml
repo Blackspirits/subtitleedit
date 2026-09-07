@@ -23,8 +23,8 @@ jobs:
           git fetch origin upl/fix-inno-libmpv-vulkan-work:refs/remotes/origin/upl/fix-inno-libmpv-vulkan-work
           git show refs/remotes/origin/upl/fix-inno-libmpv-vulkan-work:.github/scripts/upl_inno_libmpv_vulkan_patch.py > "$env:RUNNER_TEMP\upl_inno_libmpv_vulkan_patch.py"
           python "$env:RUNNER_TEMP\upl_inno_libmpv_vulkan_patch.py"
-          $expected = @('.github/workflows/build-ui.yml', 'installer/WindowsInno/Subtitle_Edit_Installer.iss') | Sort-Object
-          $actual = @(git diff --name-only HEAD | Sort-Object)
+          $expected = @('installer/WindowsInno/Subtitle_Edit_Installer.iss')
+          $actual = @(git diff --name-only HEAD)
           if (($actual -join "`n") -ne ($expected -join "`n")) { throw "Unexpected changed files: $($actual -join ', ')" }
           git diff --check HEAD
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -32,10 +32,9 @@ jobs:
       - name: Structural regression assertions
         shell: pwsh
         run: |
-          $workflow = Get-Content '.github/workflows/build-ui.yml' -Raw
           $iss = Get-Content 'installer/WindowsInno/Subtitle_Edit_Installer.iss' -Raw
-          if ($workflow -notmatch [regex]::Escape('Copy-Item "libmpv-temp/*" "./src/ui/bin/Release/net10.0/publish/"')) { throw 'Inno staging still drops libmpv companion files' }
-          if ($iss -notmatch [regex]::Escape('Source: {#bindir}\vulkan-1.dll;          DestDir: {userappdata}\Subtitle Edit; Flags: ignoreversion')) { throw 'Installer does not package vulkan-1.dll next to libmpv-2.dll' }
+          if ($iss -notmatch [regex]::Escape('Source: ..\..\libmpv-temp\vulkan-1.dll; DestDir: {userappdata}\Subtitle Edit; Flags: ignoreversion')) { throw 'Installer does not source vulkan-1.dll from the verified libmpv bundle' }
+          if ($iss -notmatch [regex]::Escape('Source: {#bindir}\libmpv-2.dll;          DestDir: {userappdata}\Subtitle Edit; Flags: ignoreversion')) { throw 'Installer no longer packages libmpv-2.dll' }
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
@@ -62,9 +61,9 @@ jobs:
             -p:DebugSymbols=false `
             -p:DebugType=none `
             -o ./src/ui/bin/Release/net10.0/publish
-          Copy-Item 'libmpv-temp/*' './src/ui/bin/Release/net10.0/publish/'
+          # Mirror the upstream Inno staging exactly: only libmpv-2.dll is copied to bindir.
+          Copy-Item 'libmpv-temp/libmpv-2.dll' './src/ui/bin/Release/net10.0/publish/'
           if (-not (Test-Path './src/ui/bin/Release/net10.0/publish/libmpv-2.dll')) { throw 'Inno staging is missing libmpv-2.dll' }
-          if (-not (Test-Path './src/ui/bin/Release/net10.0/publish/vulkan-1.dll')) { throw 'Inno staging is missing vulkan-1.dll' }
 
       - name: Install verified Inno Setup 7.1.0 x64
         shell: pwsh
@@ -93,6 +92,6 @@ jobs:
         run: |
           git config user.name 'BlackSpirits'
           git config user.email 'blackspirits@gmail.com'
-          git add .github/workflows/build-ui.yml installer/WindowsInno/Subtitle_Edit_Installer.iss
+          git add installer/WindowsInno/Subtitle_Edit_Installer.iss
           git commit -m 'Keep Vulkan loader in Inno libmpv bundle'
           git push origin HEAD:fix/inno-libmpv-vulkan
