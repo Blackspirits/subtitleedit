@@ -1,0 +1,47 @@
+name: UPL validate Windows libmpv search paths
+
+on:
+  push:
+    branches:
+      - upl/fix-windows-libmpv-search-work
+
+permissions:
+  contents: write
+
+jobs:
+  windows-libmpv-search:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: fix/windows-libmpv-search-path
+          fetch-depth: 0
+
+      - name: Apply search-path patch
+        run: |
+          git fetch origin upl/fix-windows-libmpv-search-work:refs/remotes/origin/upl/fix-windows-libmpv-search-work
+          git show refs/remotes/origin/upl/fix-windows-libmpv-search-work:.github/scripts/upl_windows_libmpv_search_patch.py > "$RUNNER_TEMP/upl_windows_libmpv_search_patch.py"
+          python "$RUNNER_TEMP/upl_windows_libmpv_search_patch.py"
+          expected=$'src/ui/Logic/VideoPlayers/LibMpvDynamic/LibMpvDynamicPlayer.cs\ntests/UI/Logic/VideoPlayers/LibMpvLibraryPathTests.cs'
+          actual="$(git diff --name-only HEAD)"
+          test "$actual" = "$expected" || { echo "Unexpected changed files:"; printf '%s\n' "$actual"; exit 1; }
+          git diff --check HEAD
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Run focused libmpv tests
+        run: dotnet test tests/UI/UITests.csproj --filter "FullyQualifiedName~LibMpv" --logger "trx;LogFileName=libmpv-tests.trx"
+
+      - name: Build solution
+        run: dotnet build SubtitleEdit.sln --no-restore
+
+      - name: Commit validated patch
+        run: |
+          git config user.name 'BlackSpirits'
+          git config user.email 'blackspirits@gmail.com'
+          git add src/ui/Logic/VideoPlayers/LibMpvDynamic/LibMpvDynamicPlayer.cs tests/UI/Logic/VideoPlayers/LibMpvLibraryPathTests.cs
+          git commit -m 'Fix Windows libmpv search paths'
+          git push origin HEAD:fix/windows-libmpv-search-path
