@@ -1,0 +1,48 @@
+name: UPL validate VOB overwrite on 342cff
+
+on:
+  push:
+    branches:
+      - upl/vob-overwrite-342cff-validation-work
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: 45834476cc8818e002a67b908dbc1729527b1378
+          fetch-depth: 0
+
+      - name: Structural diff check
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=$(printf '%s\n' \
+            'src/seconv/Core/SubtitleConverter.cs' \
+            'src/seconv/Core/VobSubExtractor.cs' \
+            'tests/seconv/Core/VobSubExtractorTest.cs')
+          actual=$(git diff --name-only 342cff6bc44753191542ab1469d7fb5c248650ef..HEAD)
+          test "$actual" = "$expected"
+          git diff --check 342cff6bc44753191542ab1469d7fb5c248650ef..HEAD
+
+      - name: Preserve UTF-8 BOM
+        shell: python
+        run: |
+          from pathlib import Path
+          data = Path("src/seconv/Core/SubtitleConverter.cs").read_bytes()
+          assert data.startswith(b"\xef\xbb\xbf"), "SubtitleConverter.cs lost its UTF-8 BOM"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Targeted VOB regression tests
+        run: dotnet test tests/seconv/SeConvTests.csproj --filter VobSubExtractorTest
+
+      - name: Full solution tests
+        run: dotnet test SubtitleEdit.sln
