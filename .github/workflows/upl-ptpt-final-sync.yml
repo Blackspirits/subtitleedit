@@ -1,0 +1,77 @@
+name: UPL validate pt-PT v5.2.0 sync
+
+on:
+  push:
+    branches:
+      - upl/ptpt-5.2.0-final-sync-validation
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: cc6dccb8babe870341b799d5c4a2a0371c5ac2ce
+          fetch-depth: 0
+
+      - name: Structural and language parity checks
+        shell: python
+        run: |
+          import json, re
+          from pathlib import Path
+
+          en_path = Path("src/ui/Assets/Languages/English.json")
+          pt_path = Path("src/ui/Assets/Languages/Portuguese.json")
+          en = json.loads(en_path.read_text(encoding="utf-8-sig"))
+          pt = json.loads(pt_path.read_text(encoding="utf-8-sig"))
+
+          assert pt["version"] == "v5.2.0"
+          assert pt["cultureName"] == "pt-PT"
+          assert pt["waveform"]["guessTimeCodesScanBlockSize"] == "Tamanho do bloco de varrimento (ms):"
+          assert pt["general"]["sourceViewX"] == "Visualização de origem - {0}"
+
+          def flatten(obj, prefix=""):
+              out = {}
+              for k, v in obj.items():
+                  p = f"{prefix}.{k}" if prefix else k
+                  if isinstance(v, dict):
+                      out.update(flatten(v, p))
+                  elif isinstance(v, str):
+                      out[p] = v
+              return out
+
+          def placeholders(s):
+              return sorted(re.findall(r"\{(?:\d+|[A-Za-z_][A-Za-z0-9_]*)[^}]*\}", s))
+
+          ef, pf = flatten(en), flatten(pt)
+          missing = sorted(set(ef) - set(pf))
+          extra = sorted(set(pf) - set(ef))
+          mismatches = [k for k in ef.keys() & pf.keys() if placeholders(ef[k]) != placeholders(pf[k])]
+          assert not missing, f"Missing pt-PT keys: {missing}"
+          assert not extra, f"Obsolete/extra pt-PT keys: {extra}"
+          assert not mismatches, f"Placeholder mismatches: {mismatches}"
+          assert "varredura" not in "\n".join(pf.values()).casefold()
+          assert "visualização da fonte" not in "\n".join(pf.values()).casefold()
+
+          print(f"pt-PT parity OK: {len(pf)} strings")
+
+      - name: Diff check
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git diff --name-only 18ee110d88f14881e70eff2096a791322bf785c5..HEAD)" = "src/ui/Assets/Languages/Portuguese.json"
+          git diff --check 18ee110d88f14881e70eff2096a791322bf785c5..HEAD
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Language JSON tests
+        run: dotnet test tests/UI/UITests.csproj --filter LanguageJsonFilesTests
+
+      - name: Full solution tests
+        run: dotnet test SubtitleEdit.sln
