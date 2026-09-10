@@ -47,6 +47,8 @@ internal static class HelpDisplay
         ShowParameter(console, "--input-encoding-fallback:<name>", "Assumed input encoding when no BOM and not UTF-8 (skips ANSI guess)");
         ShowParameter(console, "--forced-only", "Process forced subtitles only");
         ShowParameter(console, "--fps:<frame rate>", "Frame rate for conversion");
+        ShowParameter(console, "--vob-pal", "VOB input: treat DVD video as PAL (720x576; default)");
+        ShowParameter(console, "--vob-ntsc", "VOB input: treat DVD video as NTSC (720x480)");
         ShowParameter(console, "--input-folder:<folder name>", "Input folder path");
         ShowParameter(console, "--offset:hh:mm:ss:ms", "Time offset");
         ShowParameter(console, "--output-filename:<file name>", "Output file name (for single file only)");

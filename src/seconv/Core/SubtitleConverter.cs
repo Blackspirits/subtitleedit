@@ -262,10 +262,9 @@ internal class SubtitleConverter
 
         try
         {
-            // IsPal — there's no single reliable auto-detect from VOB alone (would need
-            // IFO parsing). Default to PAL to match the GUI's batch converter. Future
-            // work: add --vob-pal/--vob-ntsc and/or read VIDEO_TS.IFO.
-            var outputs = VobSubExtractor.Extract(vobFiles, outputBase, isPal: true, overwrite: options.Overwrite);
+            // There is no reliable PAL/NTSC auto-detect from VOB alone without IFO parsing.
+            // Preserve PAL as the default, while allowing the CLI to select NTSC explicitly.
+            var outputs = VobSubExtractor.Extract(vobFiles, outputBase, options.VobIsPal, overwrite: options.Overwrite);
             result.SuccessfulFiles = vobFiles.Count;
             // Report the first stream's output path against each input VOB. With multiple
             // streams there's no clean 1:1 mapping back to inputs, but the OutputFile slot
@@ -1115,6 +1114,10 @@ internal record class ConversionOptions
     public string? InputEncodingFallback { get; init; }
     public double? Fps { get; init; }
     public double? TargetFps { get; init; }
+
+    /// <summary>DVD VOB extraction video standard. PAL remains the default for backwards compatibility.</summary>
+    public bool VobIsPal { get; init; } = true;
+
     public bool Overwrite { get; init; }
 
     /// <summary>--keep-timestamp: copy the source file's creation/last-write time onto every output file.</summary>
