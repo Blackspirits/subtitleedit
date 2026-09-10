@@ -365,16 +365,45 @@ public sealed class LibMpvDynamicPlayer : IDisposable, IVideoPlayer
         }
     }
 
+    internal static string[] GetWindowsLibraryPaths(
+        string mpvPath,
+        string dataFolder,
+        string baseDirectory,
+        string currentDirectory)
+    {
+        var paths = new List<string>();
+
+        void AddPath(string path)
+        {
+            if (!paths.Exists(existing => string.Equals(existing, path, StringComparison.OrdinalIgnoreCase)))
+            {
+                paths.Add(path);
+            }
+        }
+
+        // A configured override wins. The per-user data folder comes next so a downloaded
+        // libmpv can override the installer/portable baseline without administrator rights.
+        if (!string.IsNullOrWhiteSpace(mpvPath))
+        {
+            AddPath(mpvPath);
+        }
+
+        AddPath(dataFolder);
+        AddPath(baseDirectory);
+        AddPath(currentDirectory);
+        AddPath(string.Empty);
+        return paths.ToArray();
+    }
+
     private static string[] GetLibraryPaths()
     {
         if (OperatingSystem.IsWindows())
         {
-            return
-            [
+            return GetWindowsLibraryPaths(
                 MpvPath,
-                Directory.GetCurrentDirectory(),
-                string.Empty,
-            ];
+                Se.DataFolder,
+                AppContext.BaseDirectory,
+                Directory.GetCurrentDirectory());
         }
         else if (OperatingSystem.IsLinux())
         {
