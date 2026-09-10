@@ -1,0 +1,69 @@
+name: UPL validate VOB fixes on 18ee
+
+on:
+  push:
+    branches:
+      - upl/vob-18ee-final-validation
+
+permissions:
+  contents: read
+
+jobs:
+  overwrite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: 268d9307e84bf1ab95593c8c5507a1d20287e99e
+          fetch-depth: 0
+      - name: Structural diff and BOM
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=$(printf '%s\n' \
+            'src/seconv/Core/SubtitleConverter.cs' \
+            'src/seconv/Core/VobSubExtractor.cs' \
+            'tests/seconv/Core/VobSubExtractorTest.cs')
+          actual=$(git diff --name-only 18ee110d88f14881e70eff2096a791322bf785c5..HEAD)
+          test "$actual" = "$expected"
+          git diff --check 18ee110d88f14881e70eff2096a791322bf785c5..HEAD
+          python - <<'PY'
+          from pathlib import Path
+          assert Path("src/seconv/Core/SubtitleConverter.cs").read_bytes().startswith(b"\xef\xbb\xbf")
+          PY
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Targeted VOB regression
+        run: dotnet test tests/seconv/SeConvTests.csproj --filter VobSubExtractorTest
+      - name: Full solution
+        run: dotnet test SubtitleEdit.sln
+
+  ntsc-after-overwrite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: 57060b18e2b01f6cba5e0b682162a1e76bbf8372
+          fetch-depth: 0
+      - name: Structural diff and combined call site
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check 18ee110d88f14881e70eff2096a791322bf785c5..HEAD
+          grep -F 'VobSubExtractor.Extract(vobFiles, outputBase, options.VobIsPal, overwrite: options.Overwrite);' src/seconv/Core/SubtitleConverter.cs
+          grep -F 'ShowParameter(console, "--vob-pal"' src/seconv/Helpers/HelpDisplay.cs
+          grep -F 'ShowParameter(console, "--vob-ntsc"' src/seconv/Helpers/HelpDisplay.cs
+          grep -F 'public bool VobIsPal { get; init; } = true;' src/seconv/Core/SubtitleConverter.cs
+          python - <<'PY'
+          from pathlib import Path
+          assert Path("src/seconv/Core/SubtitleConverter.cs").read_bytes().startswith(b"\xef\xbb\xbf")
+          assert Path("src/seconv/Commands/ConvertCommand.cs").read_bytes().startswith(b"\xef\xbb\xbf")
+          PY
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Targeted VOB tests
+        run: dotnet test tests/seconv/SeConvTests.csproj --filter VobSubExtractorTest
+      - name: Full solution
+        run: dotnet test SubtitleEdit.sln
