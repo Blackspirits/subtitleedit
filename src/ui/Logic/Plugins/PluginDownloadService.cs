@@ -74,27 +74,10 @@ public class PluginDownloadService : IPluginDownloadService
                     targetName = SanitizeFolderName(entry.Name);
                 }
 
-                // Remove any previously installed copy of the same plugin.
                 var existing = _pluginCatalog.GetPlugins()
                     .FirstOrDefault(p => p.Manifest.Name.Equals(entry.Name, StringComparison.OrdinalIgnoreCase));
-                if (existing != null && Directory.Exists(existing.FolderPath))
-                {
-                    Directory.Delete(existing.FolderPath, recursive: true);
-                }
-
-                cancellationToken.ThrowIfCancellationRequested();
-
                 var targetPath = Path.Combine(Se.PluginsFolder, targetName);
-                if (Directory.Exists(targetPath))
-                {
-                    Directory.Delete(targetPath, recursive: true);
-                }
-
-                // Last chance to abort before the move that publishes the new
-                // plugin. Cancelling between the deletes above and the move
-                // would leave the user with no plugin at all.
-                cancellationToken.ThrowIfCancellationRequested();
-                Directory.Move(source, targetPath);
+                PublishPlugin(source, targetPath, existing?.FolderPath, cancellationToken);
             }, cancellationToken);
         }
         finally
@@ -111,6 +94,30 @@ public class PluginDownloadService : IPluginDownloadService
                 // ignore - leftover temp folder, harmless
             }
         }
+    }
+
+    internal static void PublishPlugin(
+        string source,
+        string targetPath,
+        string? existingPluginPath,
+        CancellationToken cancellationToken)
+    {
+        // This is the commit point for the replacement. Honour cancellation before any
+        // destructive operation; once an installed copy is removed, finish publishing the
+        // already-downloaded replacement instead of leaving the user with no plugin at all.
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (!string.IsNullOrEmpty(existingPluginPath) && Directory.Exists(existingPluginPath))
+        {
+            Directory.Delete(existingPluginPath, recursive: true);
+        }
+
+        if (Directory.Exists(targetPath))
+        {
+            Directory.Delete(targetPath, recursive: true);
+        }
+
+        Directory.Move(source, targetPath);
     }
 
     private static string SanitizeFolderName(string name)
