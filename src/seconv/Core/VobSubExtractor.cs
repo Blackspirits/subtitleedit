@@ -31,7 +31,7 @@ internal static class VobSubExtractor
     /// <c>movie.0.sub</c>, <c>movie.1.sub</c>, …) and the matching .idx is
     /// written alongside each one.
     /// </summary>
-    public static IReadOnlyList<StreamOutput> Extract(IReadOnlyList<string> vobFiles, string subOutputPath, bool isPal)
+    public static IReadOnlyList<StreamOutput> Extract(IReadOnlyList<string> vobFiles, string subOutputPath, bool isPal, bool overwrite = true)
     {
         if (vobFiles.Count == 0)
         {
@@ -72,15 +72,15 @@ internal static class VobSubExtractor
             .OrderBy(g => g.Key)
             .ToList();
 
+        var outputPaths = BuildOutputPaths(subOutputPath, streams.Count);
+        EnsureOutputFilesCanBeWritten(outputPaths, overwrite);
+
         var outputs = new List<StreamOutput>(streams.Count);
         for (var i = 0; i < streams.Count; i++)
         {
             var streamId = streams[i].Key;
             var streamPacks = streams[i].OrderBy(p => p.StartTime.Ticks).ToList();
-
-            var outputPath = streams.Count == 1
-                ? subOutputPath
-                : InsertStreamIndex(subOutputPath, i);
+            var outputPath = outputPaths[i];
 
             var written = WriteOneStream(streamPacks, outputPath, isPal, streamId);
             outputs.Add(new StreamOutput(outputPath, streamId, written));
@@ -98,6 +98,47 @@ internal static class VobSubExtractor
         var dir = Path.GetDirectoryName(subOutputPath) ?? string.Empty;
         var stem = Path.GetFileNameWithoutExtension(subOutputPath);
         return Path.Combine(dir, $"{stem}.{index}.sub");
+    }
+
+    internal static IReadOnlyList<string> BuildOutputPaths(string subOutputPath, int streamCount)
+    {
+        if (streamCount <= 0)
+        {
+            return [];
+        }
+
+        if (streamCount == 1)
+        {
+            return [subOutputPath];
+        }
+
+        var outputPaths = new List<string>(streamCount);
+        for (var i = 0; i < streamCount; i++)
+        {
+            outputPaths.Add(InsertStreamIndex(subOutputPath, i));
+        }
+
+        return outputPaths;
+    }
+
+    internal static void EnsureOutputFilesCanBeWritten(IReadOnlyList<string> outputPaths, bool overwrite)
+    {
+        if (overwrite)
+        {
+            return;
+        }
+
+        foreach (var outputPath in outputPaths)
+        {
+            var idxPath = Path.ChangeExtension(outputPath, ".idx");
+            foreach (var path in new[] { outputPath, idxPath })
+            {
+                if (File.Exists(path))
+                {
+                    throw new IOException($"Output file already exists: {path}. Pass --overwrite to replace it.");
+                }
+            }
+        }
     }
 
     private static int WriteOneStream(IReadOnlyList<VobSubMergedPack> packs, string outputPath, bool isPal, int streamId)
