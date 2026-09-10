@@ -1,0 +1,111 @@
+name: UPL validate post-5.2.0 critical fixes
+
+on:
+  push:
+    branches:
+      - upl/post-520-critical-fixes-validation
+
+permissions:
+  contents: read
+
+jobs:
+  ytdlp-checksum:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: b02f51826ca84dd26123a35e1f296a358ba29902
+          fetch-depth: 0
+      - name: Diff check
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=$(printf '%s\n' \
+            'src/ui/Logic/Download/YtDlpDownloadService.cs' \
+            'tests/UI/Logic/Download/YtDlpDownloadServiceTests.cs')
+          actual=$(git diff --name-only 18ee110d88f14881e70eff2096a791322bf785c5..HEAD)
+          test "$actual" = "$expected"
+          git diff --check 18ee110d88f14881e70eff2096a791322bf785c5..HEAD
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Targeted yt-dlp tests
+        run: dotnet test tests/UI/UITests.csproj --filter YtDlpDownloadServiceTests
+      - name: Full solution
+        run: dotnet test SubtitleEdit.sln
+
+  plugin-cancel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: 96240ea711bb0dc51056601d39b6f6df6f5ac5a8
+          fetch-depth: 0
+      - name: Diff check
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=$(printf '%s\n' \
+            'src/ui/Logic/Plugins/PluginDownloadService.cs' \
+            'tests/UI/Logic/Plugins/PluginDownloadServiceTests.cs')
+          actual=$(git diff --name-only 18ee110d88f14881e70eff2096a791322bf785c5..HEAD)
+          test "$actual" = "$expected"
+          git diff --check 18ee110d88f14881e70eff2096a791322bf785c5..HEAD
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Targeted plugin tests
+        run: dotnet test tests/UI/UITests.csproj --filter PluginDownloadServiceTests
+      - name: Full solution
+        run: dotnet test SubtitleEdit.sln
+
+  installer-settings:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: 41b8d2282496dc85b89898dad908d2eec5b97c13
+          fetch-depth: 0
+      - name: Structural checks
+        shell: pwsh
+        run: |
+          $changed = (git diff --name-only 18ee110d88f14881e70eff2096a791322bf785c5..HEAD).Trim()
+          if ($changed -ne 'installer/WindowsInno/Subtitle_Edit_Installer.iss') { throw "Unexpected changed files: $changed" }
+          git diff --check 18ee110d88f14881e70eff2096a791322bf785c5..HEAD
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $text = Get-Content 'installer/WindowsInno/Subtitle_Edit_Installer.iss' -Raw
+          if ($text -notmatch [regex]::Escape('Name: {userappdata}\Subtitle Edit\Settings.json; Tasks: reset_settings')) { throw 'Reset task does not delete Settings.json' }
+          if ($text -notmatch [regex]::Escape("FileExists(ExpandConstant('{userappdata}\Subtitle Edit\Settings.json')) or")) { throw 'SettingsExist does not detect Settings.json' }
+          if ($text -notmatch [regex]::Escape("FileExists(ExpandConstant('{userappdata}\Subtitle Edit\Settings.xml'))")) { throw 'Legacy Settings.xml compatibility was lost' }
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Publish Windows x64 app
+        shell: pwsh
+        run: |
+          dotnet publish src/ui/UI.csproj -c Release -r win-x64 --self-contained false `
+            -p:PublishSingleFile=true `
+            -p:DebugSymbols=false `
+            -p:DebugType=none `
+            -o ./src/ui/bin/Release/net10.0/publish
+          New-Item -ItemType File -Force ./src/ui/bin/Release/net10.0/publish/libmpv-2.dll | Out-Null
+      - name: Install verified Inno Setup 7.1.0 x64
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/jrsoftware/issrc/releases/download/is-7_1_0/innosetup-7.1.0-x64.exe'
+          $expectedSha256 = '0362a383ed217d4c4239b5933866dd96d3eb2102737da92f80f6057a4b40df2f'
+          $installer = "$env:RUNNER_TEMP\innosetup.exe"
+          Invoke-WebRequest -Uri $url -OutFile $installer
+          $actualSha256 = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualSha256 -ne $expectedSha256) { throw "Inno Setup SHA-256 mismatch: expected $expectedSha256, got $actualSha256" }
+          Start-Process -FilePath $installer -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait
+      - name: Compile installer
+        shell: pwsh
+        run: |
+          $iscc = "$env:ProgramFiles\Inno Setup 7\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found at $iscc" }
+          & $iscc 'installer\WindowsInno\Subtitle_Edit_Installer.iss'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $setup = Get-ChildItem 'installer\WindowsInno\SubtitleEdit-*-Setup.exe' | Select-Object -First 1
+          if (-not $setup) { throw 'Installer compile succeeded without producing a setup executable' }
+          Write-Host "Compiled successfully: $($setup.Name)"
