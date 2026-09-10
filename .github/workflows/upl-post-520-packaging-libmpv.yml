@@ -1,0 +1,144 @@
+name: UPL validate post-5.2.0 packaging and libmpv fixes
+
+on:
+  push:
+    branches:
+      - upl/post-520-packaging-libmpv-validation
+
+permissions:
+  contents: read
+
+jobs:
+  libmpv-search:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: c116b24fdb9903b398c225c02ddb803c5277335a
+          fetch-depth: 0
+      - name: Diff check
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=$(printf '%s\n' \
+            'src/ui/Logic/VideoPlayers/LibMpvDynamic/LibMpvDynamicPlayer.cs' \
+            'tests/UI/Logic/VideoPlayers/LibMpvLibraryPathTests.cs')
+          actual=$(git diff --name-only 18ee110d88f14881e70eff2096a791322bf785c5..HEAD)
+          test "$actual" = "$expected"
+          git diff --check 18ee110d88f14881e70eff2096a791322bf785c5..HEAD
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Focused libmpv tests
+        run: dotnet test tests/UI/UITests.csproj --filter "FullyQualifiedName~LibMpv"
+      - name: Full solution
+        run: dotnet test SubtitleEdit.sln
+
+  inno-vulkan:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: 4491993a142474f0aa9217a907b8dd8c7b36df8f
+          fetch-depth: 0
+      - name: Structural checks
+        shell: pwsh
+        run: |
+          $changed = (git diff --name-only 18ee110d88f14881e70eff2096a791322bf785c5..HEAD).Trim()
+          if ($changed -ne 'installer/WindowsInno/Subtitle_Edit_Installer.iss') { throw "Unexpected changed files: $changed" }
+          git diff --check 18ee110d88f14881e70eff2096a791322bf785c5..HEAD
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $iss = Get-Content 'installer/WindowsInno/Subtitle_Edit_Installer.iss' -Raw
+          if ($iss -notmatch [regex]::Escape('Source: ..\..\libmpv-temp\vulkan-1.dll; DestDir: {userappdata}\Subtitle Edit; Flags: ignoreversion')) { throw 'Installer does not include vulkan-1.dll' }
+          if ($iss -notmatch [regex]::Escape('Source: {#bindir}\libmpv-2.dll;          DestDir: {userappdata}\Subtitle Edit; Flags: ignoreversion')) { throw 'Installer lost libmpv-2.dll' }
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Download verified libmpv bundle
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/SubtitleEdit/support-files/releases/download/libmpv-2026-08-14b/libmpv2-win64.zip'
+          $expectedSha256 = 'ce99ee7a9cab0ada2f696b04132def67b0978157d5f4a1a7966d04c92aebbfec'
+          Invoke-WebRequest -Uri $url -OutFile 'libmpv2-64.zip'
+          $actualSha256 = (Get-FileHash 'libmpv2-64.zip' -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualSha256 -ne $expectedSha256) { throw "libmpv ZIP SHA-256 mismatch: expected $expectedSha256, got $actualSha256" }
+          Expand-Archive -Path 'libmpv2-64.zip' -DestinationPath 'libmpv-temp'
+          if (-not (Test-Path 'libmpv-temp/libmpv-2.dll')) { throw 'Verified bundle is missing libmpv-2.dll' }
+          if (-not (Test-Path 'libmpv-temp/vulkan-1.dll')) { throw 'Verified bundle is missing vulkan-1.dll' }
+      - name: Publish Windows x64 app
+        shell: pwsh
+        run: |
+          dotnet publish src/ui/UI.csproj -c Release -r win-x64 --self-contained false `
+            -p:PublishSingleFile=true `
+            -p:DebugSymbols=false `
+            -p:DebugType=none `
+            -o ./src/ui/bin/Release/net10.0/publish
+          Copy-Item 'libmpv-temp/libmpv-2.dll' './src/ui/bin/Release/net10.0/publish/'
+      - name: Install verified Inno Setup 7.1.0 x64
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/jrsoftware/issrc/releases/download/is-7_1_0/innosetup-7.1.0-x64.exe'
+          $expectedSha256 = '0362a383ed217d4c4239b5933866dd96d3eb2102737da92f80f6057a4b40df2f'
+          $installer = "$env:RUNNER_TEMP\innosetup.exe"
+          Invoke-WebRequest -Uri $url -OutFile $installer
+          $actualSha256 = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualSha256 -ne $expectedSha256) { throw "Inno Setup SHA-256 mismatch: expected $expectedSha256, got $actualSha256" }
+          Start-Process -FilePath $installer -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait
+      - name: Compile installer
+        shell: pwsh
+        run: |
+          $iscc = "$env:ProgramFiles\Inno Setup 7\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found at $iscc" }
+          & $iscc 'installer\WindowsInno\Subtitle_Edit_Installer.iss'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $setup = Get-ChildItem 'installer\WindowsInno\SubtitleEdit-*-Setup.exe' | Select-Object -First 1
+          if (-not $setup) { throw 'No setup executable produced' }
+
+  inno-7:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: 96b3c369e266c1ef65e34a7e764b49e15b9f1d87
+          fetch-depth: 0
+      - name: Workflow diff check
+        shell: pwsh
+        run: |
+          $changed = (git diff --name-only 18ee110d88f14881e70eff2096a791322bf785c5..HEAD).Trim()
+          if ($changed -ne '.github/workflows/build-ui.yml') { throw "Unexpected changed files: $changed" }
+          git diff --check 18ee110d88f14881e70eff2096a791322bf785c5..HEAD
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $text = Get-Content '.github/workflows/build-ui.yml' -Raw
+          if ($text -notmatch 'Inno Setup 7\.1\.0 x64') { throw 'Workflow does not pin Inno Setup 7.1.0 x64' }
+          if ($text -notmatch '0362a383ed217d4c4239b5933866dd96d3eb2102737da92f80f6057a4b40df2f') { throw 'Workflow does not pin expected SHA-256' }
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Publish Windows x64 app
+        shell: pwsh
+        run: |
+          dotnet publish src/ui/UI.csproj -c Release -r win-x64 --self-contained false `
+            -p:PublishSingleFile=true `
+            -p:DebugSymbols=false `
+            -p:DebugType=none `
+            -o ./src/ui/bin/Release/net10.0/publish
+          New-Item -ItemType File -Force ./src/ui/bin/Release/net10.0/publish/libmpv-2.dll | Out-Null
+      - name: Install the exact verified Inno binary from the patch
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/jrsoftware/issrc/releases/download/is-7_1_0/innosetup-7.1.0-x64.exe'
+          $expectedSha256 = '0362a383ed217d4c4239b5933866dd96d3eb2102737da92f80f6057a4b40df2f'
+          $installer = "$env:RUNNER_TEMP\innosetup.exe"
+          Invoke-WebRequest -Uri $url -OutFile $installer
+          $actualSha256 = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualSha256 -ne $expectedSha256) { throw "Inno Setup SHA-256 mismatch: expected $expectedSha256, got $actualSha256" }
+          Start-Process -FilePath $installer -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait
+      - name: Compile installer
+        shell: pwsh
+        run: |
+          $iscc = "$env:ProgramFiles\Inno Setup 7\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found at $iscc" }
+          & $iscc 'installer\WindowsInno\Subtitle_Edit_Installer.iss'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $setup = Get-ChildItem 'installer\WindowsInno\SubtitleEdit-*-Setup.exe' | Select-Object -First 1
+          if (-not $setup) { throw 'No setup executable produced' }
