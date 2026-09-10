@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: 45834476cc8818e002a67b908dbc1729527b1378
+          ref: 52fcafafc373cb9c00b46507318407742ae09eff
           fetch-depth: 0
 
       - name: Structural diff check
