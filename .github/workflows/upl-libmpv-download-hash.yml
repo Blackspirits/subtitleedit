@@ -1,0 +1,49 @@
+name: UPL validate Windows libmpv download hashes
+
+on:
+  push:
+    branches:
+      - upl/libmpv-download-hash-validation
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: 180c303a7af1c5af1288632a2ef7664467113e78
+          fetch-depth: 0
+
+      - name: Diff and workflow assertions
+        shell: pwsh
+        run: |
+          $changed = (git diff --name-only 18ee110d88f14881e70eff2096a791322bf785c5..HEAD).Trim()
+          if ($changed -ne '.github/workflows/build-ui.yml') { throw "Unexpected changed files: $changed" }
+          git diff --check 18ee110d88f14881e70eff2096a791322bf785c5..HEAD
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $text = Get-Content '.github/workflows/build-ui.yml' -Raw
+          if ($text -notmatch 'ce99ee7a9cab0ada2f696b04132def67b0978157d5f4a1a7966d04c92aebbfec') { throw 'Missing x64 libmpv digest' }
+          if ($text -notmatch 'd8be93f69eb102026ba81d5d237887b858701510c9e5e26996a2d30f9829df00') { throw 'Missing ARM64 libmpv digest' }
+
+      - name: Verify current Windows libmpv release assets
+        shell: pwsh
+        run: |
+          $x64Url = 'https://github.com/SubtitleEdit/support-files/releases/download/libmpv-2026-08-14b/libmpv2-win64.zip'
+          $x64Expected = 'ce99ee7a9cab0ada2f696b04132def67b0978157d5f4a1a7966d04c92aebbfec'
+          Invoke-WebRequest -Uri $x64Url -OutFile 'libmpv2-64.zip'
+          $x64Actual = (Get-FileHash 'libmpv2-64.zip' -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($x64Actual -ne $x64Expected) { throw "x64 hash mismatch: $x64Actual" }
+
+          $arm64Url = 'https://github.com/SubtitleEdit/support-files/releases/download/libmpv-2026-08-14b/libmpv2-win-arm64.zip'
+          $arm64Expected = 'd8be93f69eb102026ba81d5d237887b858701510c9e5e26996a2d30f9829df00'
+          Invoke-WebRequest -Uri $arm64Url -OutFile 'libmpv2-arm64.zip'
+          $arm64Actual = (Get-FileHash 'libmpv2-arm64.zip' -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($arm64Actual -ne $arm64Expected) { throw "ARM64 hash mismatch: $arm64Actual" }
+
+          Expand-Archive -Path 'libmpv2-64.zip' -DestinationPath 'libmpv-temp'
+          Expand-Archive -Path 'libmpv2-arm64.zip' -DestinationPath 'libmpv-arm64-temp'
+          if (-not (Test-Path 'libmpv-temp/libmpv-2.dll')) { throw 'x64 bundle missing libmpv-2.dll' }
+          if (-not (Test-Path 'libmpv-arm64-temp/libmpv-2.dll')) { throw 'ARM64 bundle missing libmpv-2.dll' }
