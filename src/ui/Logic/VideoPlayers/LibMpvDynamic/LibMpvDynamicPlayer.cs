@@ -372,10 +372,22 @@ public sealed class LibMpvDynamicPlayer : IDisposable, IVideoPlayer
         string currentDirectory)
     {
         var paths = new List<string>();
+        var comparisonPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         void AddPath(string path)
         {
-            if (!paths.Exists(existing => string.Equals(existing, path, StringComparison.OrdinalIgnoreCase)))
+            if (string.IsNullOrEmpty(path))
+            {
+                if (comparisonPaths.Add(string.Empty))
+                {
+                    paths.Add(path);
+                }
+
+                return;
+            }
+
+            var comparisonPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+            if (comparisonPaths.Add(comparisonPath))
             {
                 paths.Add(path);
             }

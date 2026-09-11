@@ -42,4 +42,16 @@ public class LibMpvLibraryPathTests
 
         Assert.Equal(["/portable", string.Empty], paths);
     }
+    [Fact]
+    public void GetWindowsLibraryPaths_DeduplicatesEquivalentRootsWithTrailingSeparator()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "libmpv-path-test");
+        var rootWithSeparator = root + Path.DirectorySeparatorChar;
+
+        var paths = LibMpvDynamicPlayer.GetWindowsLibraryPaths(string.Empty, rootWithSeparator, root, root);
+
+        Assert.Equal([rootWithSeparator, string.Empty], paths);
+    }
+
+
 }
