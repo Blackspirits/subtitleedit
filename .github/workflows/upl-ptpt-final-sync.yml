@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: cc6dccb8babe870341b799d5c4a2a0371c5ac2ce
+          ref: 1d0c0890db6b3f7e59a1578822ac4df355002dc1
           fetch-depth: 0
 
       - name: Structural and language parity checks
