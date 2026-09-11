@@ -380,11 +380,24 @@ jobs:
       # - name: Test
       #   run: dotnet test --no-build --verbosity normal
 
-      - name: Download libmpv for Windows
+      - name: Download verified libmpv for Windows
         run: |
-          Invoke-WebRequest -Uri "https://github.com/SubtitleEdit/support-files/releases/download/libmpv-2026-08-14b/libmpv2-win64.zip" -OutFile "libmpv2-64.zip"
+          $x64Url = "https://github.com/SubtitleEdit/support-files/releases/download/libmpv-2026-08-14b/libmpv2-win64.zip"
+          $x64Sha256 = "ce99ee7a9cab0ada2f696b04132def67b0978157d5f4a1a7966d04c92aebbfec"
+          Invoke-WebRequest -Uri $x64Url -OutFile "libmpv2-64.zip"
+          $actualX64Sha256 = (Get-FileHash "libmpv2-64.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualX64Sha256 -ne $x64Sha256) {
+            throw "libmpv x64 SHA-256 mismatch: expected $x64Sha256, got $actualX64Sha256"
+          }
           Expand-Archive -Path "libmpv2-64.zip" -DestinationPath "libmpv-temp"
-          Invoke-WebRequest -Uri "https://github.com/SubtitleEdit/support-files/releases/download/libmpv-2026-08-14b/libmpv2-win-arm64.zip" -OutFile "libmpv2-arm64.zip"
+
+          $arm64Url = "https://github.com/SubtitleEdit/support-files/releases/download/libmpv-2026-08-14b/libmpv2-win-arm64.zip"
+          $arm64Sha256 = "d8be93f69eb102026ba81d5d237887b858701510c9e5e26996a2d30f9829df00"
+          Invoke-WebRequest -Uri $arm64Url -OutFile "libmpv2-arm64.zip"
+          $actualArm64Sha256 = (Get-FileHash "libmpv2-arm64.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualArm64Sha256 -ne $arm64Sha256) {
+            throw "libmpv ARM64 SHA-256 mismatch: expected $arm64Sha256, got $actualArm64Sha256"
+          }
           Expand-Archive -Path "libmpv2-arm64.zip" -DestinationPath "libmpv-arm64-temp"
 
       - name: Publish Windows x64 app
