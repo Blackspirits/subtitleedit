@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: c116b24fdb9903b398c225c02ddb803c5277335a
+          ref: 293c9388fdaa6a59fc2efb6be228a0b75fa2be4f
           fetch-depth: 0
       - name: Diff check
         shell: bash
