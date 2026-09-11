@@ -7,6 +7,7 @@ using Nikse.SubtitleEdit.Features.Shared;
 using Nikse.SubtitleEdit.Logic.Config;
 using Nikse.SubtitleEdit.Logic.Download;
 using Nikse.SubtitleEdit.Logic.SevenZipExtractor;
+using Nikse.SubtitleEdit.UiLogic;
 using Nikse.SubtitleEdit.UiLogic.Http;
 using System;
 using System.Collections.Generic;
@@ -36,7 +37,7 @@ public partial class DownloadPaddleOcrViewModel : ObservableObject, IClosingClea
     private string _tempFolder;
     private Task? _downloadTask;
     private int _downloadTaskIndex;
-    private List<string> _downloadTaskUrls;
+    private List<PaddleOcr.PaddleOcrAsset> _downloadTaskAssets;
     private Timer _timer = new Timer(500);
     private bool _done;
     private readonly CancellationTokenSource _cancellationTokenSource;
@@ -52,7 +53,7 @@ public partial class DownloadPaddleOcrViewModel : ObservableObject, IClosingClea
         Error = string.Empty;
         _tempFolder = string.Empty;
         _downloadType = PaddleOcrDownloadType.Models;
-        _downloadTaskUrls = new List<string>();
+        _downloadTaskAssets = new List<PaddleOcr.PaddleOcrAsset>();
         _downloadTaskIndex = 0;
     }
 
@@ -92,15 +93,15 @@ public partial class DownloadPaddleOcrViewModel : ObservableObject, IClosingClea
             {
                 _timer.Stop();
 
-                if (_downloadTaskIndex < _downloadTaskUrls.Count - 1)
+                if (_downloadTaskIndex < _downloadTaskAssets.Count - 1)
                 {
                     _downloadTaskIndex++;
                     Dispatcher.UIThread.Post(() =>
                     {
-                        ProgressText = $"Starting download {_downloadTaskIndex + 1} of {_downloadTaskUrls.Count}...";
-                        var url = _downloadTaskUrls[_downloadTaskIndex];
-                        var fileName = Path.Combine(_tempFolder, Path.GetFileName(url));
-                        _downloadTask = DownloadHelper.DownloadFileAsync(HttpClientFactoryWithProxy.CreateHttpClientWithProxy(), url, fileName, new Progress<float>(number =>
+                        ProgressText = $"Starting download {_downloadTaskIndex + 1} of {_downloadTaskAssets.Count}...";
+                        var asset = _downloadTaskAssets[_downloadTaskIndex];
+                        var fileName = Path.Combine(_tempFolder, Path.GetFileName(asset.Url));
+                        _downloadTask = DownloadAssetAsync(asset, fileName, new Progress<float>(number =>
                         {
                             var percentage = (int)Math.Round(number * 100.0, MidpointRounding.AwayFromZero);
                             var pctString = percentage.ToString(CultureInfo.InvariantCulture);
@@ -129,7 +130,7 @@ public partial class DownloadPaddleOcrViewModel : ObservableObject, IClosingClea
 
                 try
                 {
-                    var firstFile = Path.Combine(_tempFolder, Path.GetFileName(_downloadTaskUrls[0]));
+                    var firstFile = Path.Combine(_tempFolder, Path.GetFileName(_downloadTaskAssets[0].Url));
                     var isModels = _downloadType == PaddleOcrDownloadType.Models;
                     var archive = PaddleOcr.GetArchive(_downloadType);
 
@@ -234,11 +235,70 @@ public partial class DownloadPaddleOcrViewModel : ObservableObject, IClosingClea
         }
     }
 
+    private async Task DownloadAssetAsync(
+        PaddleOcr.PaddleOcrAsset asset,
+        string destinationFileName,
+        IProgress<float>? progress,
+        CancellationToken cancellationToken)
+    {
+        using var httpClient = HttpClientFactoryWithProxy.CreateHttpClientWithProxy();
+        await DownloadAndVerifyAssetAsync(httpClient, asset, destinationFileName, progress, cancellationToken);
+    }
+
+    internal static async Task DownloadAndVerifyAssetAsync(
+        HttpClient httpClient,
+        PaddleOcr.PaddleOcrAsset asset,
+        string destinationFileName,
+        IProgress<float>? progress,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(asset.Sha256))
+        {
+            throw new InvalidOperationException($"No SHA-256 is pinned for Paddle OCR asset '{asset.Url}'.");
+        }
+
+        try
+        {
+            await DownloadHelper.DownloadFileAsync(
+                httpClient,
+                asset.Url,
+                destinationFileName,
+                progress,
+                cancellationToken);
+
+            string actual;
+            await using (var stream = File.OpenRead(destinationFileName))
+            {
+                actual = await Sha256Util.ComputeSha256Async(stream, cancellationToken);
+            }
+
+            if (!string.Equals(asset.Sha256, actual, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new IOException(
+                    $"Paddle OCR download failed integrity check for {Path.GetFileName(asset.Url)} " +
+                    $"(expected SHA-256 {asset.Sha256}, got {actual}).");
+            }
+        }
+        catch
+        {
+            try
+            {
+                File.Delete(destinationFileName);
+            }
+            catch
+            {
+                // Preserve the download/integrity error; cleanup is best-effort.
+            }
+
+            throw;
+        }
+    }
+
     private bool AllFileExists()
     {
-        foreach (var url in _downloadTaskUrls)
+        foreach (var asset in _downloadTaskAssets)
         {
-            var fileName = Path.Combine(_tempFolder, Path.GetFileName(url));
+            var fileName = Path.Combine(_tempFolder, Path.GetFileName(asset.Url));
             if (!File.Exists(fileName))
             {
                 Se.LogError($"Expected file not found after download: {fileName}");
@@ -308,12 +368,12 @@ public partial class DownloadPaddleOcrViewModel : ObservableObject, IClosingClea
         _tempFolder = Path.Combine(folder, $"{Guid.NewGuid()}");
         Directory.CreateDirectory(_tempFolder);
         _downloadTaskIndex = 0;
-        _downloadTaskUrls = new List<string>();
+        _downloadTaskAssets = new List<PaddleOcr.PaddleOcrAsset>();
 
-        List<string> urls;
+        List<PaddleOcr.PaddleOcrAsset> assets;
         try
         {
-            urls = PaddleOcr.GetArchive(_downloadType).Urls.ToList();
+            assets = PaddleOcr.GetArchive(_downloadType).Assets.ToList();
         }
         catch (ArgumentOutOfRangeException exception)
         {
@@ -323,10 +383,10 @@ public partial class DownloadPaddleOcrViewModel : ObservableObject, IClosingClea
             return;
         }
 
-        _downloadTaskUrls.AddRange(urls);
-        var firstUrl = _downloadTaskUrls[_downloadTaskIndex];
-        var firstFileName = Path.Combine(_tempFolder, Path.GetFileName(firstUrl));
-        _downloadTask = DownloadHelper.DownloadFileAsync(HttpClientFactoryWithProxy.CreateHttpClientWithProxy(), firstUrl, firstFileName, downloadProgress, _cancellationTokenSource.Token);
+        _downloadTaskAssets.AddRange(assets);
+        var firstAsset = _downloadTaskAssets[_downloadTaskIndex];
+        var firstFileName = Path.Combine(_tempFolder, Path.GetFileName(firstAsset.Url));
+        _downloadTask = DownloadAssetAsync(firstAsset, firstFileName, downloadProgress, _cancellationTokenSource.Token);
 
         _timer.Elapsed += OnTimerOnElapsed;
         _timer.Start();
