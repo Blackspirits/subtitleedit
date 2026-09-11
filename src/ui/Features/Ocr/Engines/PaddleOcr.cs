@@ -45,29 +45,54 @@ public partial class PaddleOcr
     private const string StandaloneRelease = "https://github.com/timminator/PaddleOCR-Standalone/releases/download/v3.7.0/";
 
     /// <summary>
-    /// One downloadable Paddle OCR archive: the file(s) to fetch, and the folder level inside
-    /// the archive that the extractor has to strip. Keeping the two together is what stops a
-    /// version bump from updating the URL but leaving the unpack looking for the old folder.
+    /// One downloadable Paddle OCR asset and its release-published SHA-256 digest.
+    /// Keeping URL and digest together prevents a version bump from silently reusing a
+    /// checksum that belongs to a different archive.
     /// </summary>
-    public sealed record PaddleOcrArchive(IReadOnlyList<string> Urls, string RootFolderInArchive);
+    public sealed record PaddleOcrAsset(string Url, string Sha256);
+
+    /// <summary>
+    /// One downloadable Paddle OCR archive: the asset(s) to fetch, and the folder level inside
+    /// the archive that the extractor has to strip. Keeping these together is what stops a
+    /// version bump from updating one part of the install contract without the others.
+    /// </summary>
+    public sealed record PaddleOcrArchive(IReadOnlyList<PaddleOcrAsset> Assets, string RootFolderInArchive)
+    {
+        public IReadOnlyList<string> Urls => Assets.Select(asset => asset.Url).ToArray();
+    }
 
     public static PaddleOcrArchive GetArchive(PaddleOcrDownloadType downloadType)
     {
         return downloadType switch
         {
-            PaddleOcrDownloadType.Models => Archive("PaddleOCR.PP-OCRv6.support.files.VideOCR.7z", "PaddleOCR.PP-OCRv6.support.files"),
-            PaddleOcrDownloadType.EngineCpu => Archive("PaddleOCR-CPU-v3.7.0.7z"),
-            PaddleOcrDownloadType.EngineGpu11 => Archive("PaddleOCR-GPU-v3.7.0-CUDA-11.8.7z"),
-            PaddleOcrDownloadType.EngineGpu12 => Archive("PaddleOCR-GPU-v3.7.0-CUDA-12.9.7z"),
-            PaddleOcrDownloadType.EngineCpuLinux => Archive("PaddleOCR-CPU-v3.7.0-Linux.7z"),
-            PaddleOcrDownloadType.EngineGpu11Linux => Archive("PaddleOCR-GPU-v3.7.0-CUDA-11.8-Linux.7z"),
+            PaddleOcrDownloadType.Models => Archive(
+                "PaddleOCR.PP-OCRv6.support.files.VideOCR.7z",
+                "7f98a187a1d8d9b5291f3be7cd6a6b693b32ddffd75d39c05d333d8f0b3ee145",
+                "PaddleOCR.PP-OCRv6.support.files"),
+            PaddleOcrDownloadType.EngineCpu => Archive(
+                "PaddleOCR-CPU-v3.7.0.7z",
+                "a1b597f5620d1a86cec606b50908a12fc1b215adf6807be5538b7ca6bddc9d20"),
+            PaddleOcrDownloadType.EngineGpu11 => Archive(
+                "PaddleOCR-GPU-v3.7.0-CUDA-11.8.7z",
+                "5bfe2009cab89ce7f6b70f43f8250460ce6ccc6ccf176b95e0c363079bc4da50"),
+            PaddleOcrDownloadType.EngineGpu12 => Archive(
+                "PaddleOCR-GPU-v3.7.0-CUDA-12.9.7z",
+                "6a2c1f17f093403c8f2f4c4c7b81148b29abe710604aca8fac403af2be173cab"),
+            PaddleOcrDownloadType.EngineCpuLinux => Archive(
+                "PaddleOCR-CPU-v3.7.0-Linux.7z",
+                "1d2bd1db1d534dcd433c2d658f1c9ed13beb92fc7201a7049d376bd15e8fc39e"),
+            PaddleOcrDownloadType.EngineGpu11Linux => Archive(
+                "PaddleOCR-GPU-v3.7.0-CUDA-11.8-Linux.7z",
+                "3850afef8ba8bf9f65911e855a866f9df0de06b0b8f0030dbd827162819d7158"),
 
             // Split into two volumes upstream. Both have to land in the same folder before the
             // .001 is handed to the extractor - the download queue takes care of that.
             PaddleOcrDownloadType.EngineGpu12Linux => Archive(
                 "PaddleOCR-GPU-v3.7.0-CUDA-12.9-Linux.7z.001",
+                "e154edaa5f80913d2a3aba0c05110ebf09f5d100f9db1b11e2d2d2b61bff4212",
                 "PaddleOCR-GPU-v3.7.0-CUDA-12.9-Linux",
-                "PaddleOCR-GPU-v3.7.0-CUDA-12.9-Linux.7z.002"),
+                ("PaddleOCR-GPU-v3.7.0-CUDA-12.9-Linux.7z.002",
+                    "900200376f77a85fc4fc2562b1832fc547092eaa6951772894666be87585bf89")),
 
             _ => throw new ArgumentOutOfRangeException(nameof(downloadType), downloadType, "Unknown Paddle OCR download type"),
         };
@@ -76,15 +101,25 @@ public partial class PaddleOcr
     // The engine archives all wrap their content in a folder named after the archive itself,
     // so the root folder is derived rather than repeated; the models archive is the one that
     // does not follow that rule (".VideOCR" is in the file name only) and passes it in.
-    private static PaddleOcrArchive Archive(string fileName, string? rootFolderInArchive = null, params string[] extraFileNames)
+    private static PaddleOcrArchive Archive(
+        string fileName,
+        string sha256,
+        string? rootFolderInArchive = null,
+        params (string FileName, string Sha256)[] extraFiles)
     {
-        var urls = new List<string>(1 + extraFileNames.Length) { StandaloneRelease + fileName };
-        foreach (var extraFileName in extraFileNames)
+        var assets = new List<PaddleOcrAsset>(1 + extraFiles.Length)
         {
-            urls.Add(StandaloneRelease + extraFileName);
+            new(StandaloneRelease + fileName, sha256),
+        };
+
+        foreach (var extraFile in extraFiles)
+        {
+            assets.Add(new PaddleOcrAsset(StandaloneRelease + extraFile.FileName, extraFile.Sha256));
         }
 
-        return new PaddleOcrArchive(urls, rootFolderInArchive ?? fileName[..fileName.IndexOf(".7z", StringComparison.Ordinal)]);
+        return new PaddleOcrArchive(
+            assets,
+            rootFolderInArchive ?? fileName[..fileName.IndexOf(".7z", StringComparison.Ordinal)]);
     }
 
     // Model-name mapping lives in libse (PaddleOcrModels) so seconv launches the same models.
