@@ -1,3 +1,4 @@
+using SeConv.Commands;
 using SeConv.Core;
 using Xunit;
 
@@ -29,6 +30,32 @@ public class VobSubExtractorTest : IDisposable
         {
             Directory.Delete(_tempRoot, recursive: true);
         }
+    }
+
+    [Theory]
+    [InlineData(false, false, true)]
+    [InlineData(true, false, true)]
+    [InlineData(false, true, false)]
+    public void ResolveVobIsPal_SelectsExpectedStandard(bool vobPal, bool vobNtsc, bool expectedIsPal)
+    {
+        Assert.Equal(expectedIsPal, ConvertCommand.ResolveVobIsPal(vobPal, vobNtsc));
+    }
+
+    [Fact]
+    public void ResolveVobIsPal_RejectsConflictingFlags()
+    {
+        var ex = Assert.Throws<ArgumentException>(() => ConvertCommand.ResolveVobIsPal(vobPal: true, vobNtsc: true));
+        Assert.Contains("mutually exclusive", ex.Message);
+    }
+
+    [Fact]
+    public void ConversionOptions_VobStandardDefaultsToPal_AndAllowsNtsc()
+    {
+        var defaultOptions = new ConversionOptions { Patterns = [], Format = "VobSub" };
+        var ntscOptions = new ConversionOptions { Patterns = [], Format = "VobSub", VobIsPal = false };
+
+        Assert.True(defaultOptions.VobIsPal);
+        Assert.False(ntscOptions.VobIsPal);
     }
 
     [Fact]
