@@ -4,6 +4,8 @@ using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
+using Nikse.SubtitleEdit.UiLogic;
+using Nikse.SubtitleEdit.UiLogic.AudioToText;
 
 namespace Nikse.SubtitleEdit.Logic.Download;
 
@@ -73,16 +75,19 @@ public class WhisperDownloadService : IWhisperDownloadService
     public async Task DownloadWhisperCpp(Stream stream, IProgress<float>? progress, CancellationToken cancellationToken)
     {
         await DownloadHelper.DownloadFileAsync(_httpClient, GetUrl(), stream, progress, cancellationToken);
+        await VerifyArchiveAsync(stream, DownloadHashManager.ResolveWhisperCppKey(WhisperChoice.Cpp), "Whisper.cpp", cancellationToken);
     }
 
     public async Task DownloadWhisperCppCuBlas(Stream stream, IProgress<float>? progress, CancellationToken cancellationToken)
     {
         await DownloadHelper.DownloadFileAsync(_httpClient, GetUrlCuBlas(), stream, progress, cancellationToken);
+        await VerifyArchiveAsync(stream, DownloadHashManager.ResolveWhisperCppKey(WhisperChoice.CppCuBlas), "Whisper.cpp cuBLAS", cancellationToken);
     }
 
     public async Task DownloadWhisperConstMe(Stream stream, IProgress<float>? progress, CancellationToken cancellationToken)
     {
         await DownloadHelper.DownloadFileAsync(_httpClient, DownloadUrlConstMe, stream, progress, cancellationToken);
+        await VerifyArchiveAsync(stream, DownloadHashManager.ResolveWhisperConstMeKey(), "Const-me Whisper", cancellationToken);
     }
 
     public async Task DownloadWhisperPurfviewFasterWhisperXxl(string destinationFileName, IProgress<float>? progress, CancellationToken cancellationToken)
@@ -105,16 +110,19 @@ public class WhisperDownloadService : IWhisperDownloadService
         }
 
         await DownloadHelper.DownloadFileAsync(_httpClient, url, destinationFileName, progress, cancellationToken);
+        await VerifyFileAsync(destinationFileName, DownloadHashManager.ResolvePurfviewFasterWhisperXxlKey(), "Purfview Faster-Whisper-XXL", cancellationToken);
     }
 
     public async Task DownloadWhisperCppVulkan(Stream stream,  Progress<float> progress, CancellationToken cancellationToken)
     {
         await DownloadHelper.DownloadFileAsync(_httpClient, GetUrlCppVulkan(), stream, progress, cancellationToken);
+        await VerifyArchiveAsync(stream, DownloadHashManager.ResolveWhisperCppKey(WhisperChoice.CppVulkan), "Whisper.cpp Vulkan", cancellationToken);
     }
     
     public async Task DownloadWhisperCTranslate2(Stream stream,  Progress<float> progress, CancellationToken cancellationToken)
     {
         await DownloadHelper.DownloadFileAsync(_httpClient, GetUrlTranslate2(), stream, progress, cancellationToken);
+        await VerifyArchiveAsync(stream, DownloadHashManager.ResolveWhisperCTranslate2Key(), "Whisper CTranslate2", cancellationToken);
     }
 
     public async Task DownloadWhisperX(string destinationFileName, IProgress<float>? progress, CancellationToken cancellationToken)
@@ -123,11 +131,76 @@ public class WhisperDownloadService : IWhisperDownloadService
         // in-memory _downloadStream - at 216 MB-355 MB, buffering this in memory would peak far
         // higher before unpacking even starts (MemoryStream's doubling growth).
         await DownloadHelper.DownloadFileAsync(_httpClient, GetUrlWhisperX(), destinationFileName, progress, cancellationToken);
+        await VerifyFileAsync(destinationFileName, DownloadHashManager.ResolveWhisperXKey(), "WhisperX", cancellationToken);
     }
 
     public async Task DownloadSileroVad(Stream stream, IProgress<float>? progress, CancellationToken cancellationToken)
     {
         await DownloadHelper.DownloadFileAsync(_httpClient, SileroVadUrl, stream, progress, cancellationToken);
+    }
+
+    internal static async Task VerifyArchiveAsync(Stream stream, string? key, string artifactName, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(key))
+        {
+            throw new InvalidOperationException($"No SHA-256 key is registered for {artifactName}.");
+        }
+
+        var expected = DownloadHashManager.GetLatestKnownHash(key);
+        if (string.IsNullOrEmpty(expected))
+        {
+            throw new InvalidOperationException($"No SHA-256 is registered for {artifactName} key '{key}'.");
+        }
+
+        if (!stream.CanRead || !stream.CanSeek)
+        {
+            throw new InvalidOperationException($"{artifactName} integrity verification requires a readable, seekable stream.");
+        }
+
+        string actual;
+        stream.Position = 0;
+        try
+        {
+            actual = await Sha256Util.ComputeSha256Async(stream, cancellationToken);
+        }
+        finally
+        {
+            stream.Position = 0;
+        }
+
+        if (!string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new IOException(
+                $"{artifactName} download failed integrity check (expected SHA-256 {expected}, got {actual}).");
+        }
+    }
+
+    internal static async Task VerifyFileAsync(string fileName, string? key, string artifactName, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var stream = new FileStream(
+                fileName,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                bufferSize: 4096,
+                useAsync: true);
+            await VerifyArchiveAsync(stream, key, artifactName, cancellationToken);
+        }
+        catch
+        {
+            try
+            {
+                File.Delete(fileName);
+            }
+            catch
+            {
+                // Preserve the verification error; cleanup is best-effort.
+            }
+
+            throw;
+        }
     }
 
     private static string GetUrlTranslate2()
