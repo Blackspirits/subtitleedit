@@ -73,5 +73,12 @@ jobs:
       - name: Language JSON tests
         run: dotnet test tests/UI/UITests.csproj --filter LanguageJsonFilesTests
 
+      - name: Verify English base is current
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet test tests/UI/UITests.csproj --filter EnglishLanguageFileUpToDateTests
+          git diff --exit-code -- src/ui/Assets/Languages/English.json
+
       - name: Full solution tests
         run: dotnet test SubtitleEdit.sln
