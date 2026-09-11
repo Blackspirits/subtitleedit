@@ -1,0 +1,43 @@
+name: UPL validate final Windows libmpv search
+
+on:
+  push:
+    branches:
+      - upl/libmpv-search-424d-final-validation
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: 424d1ffb1f3dac6b2080aebcb83a0f18d5abf058
+          fetch-depth: 0
+
+      - name: Structural checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=$(printf '%s\n' \
+            'src/ui/Logic/VideoPlayers/LibMpvDynamic/LibMpvDynamicPlayer.cs' \
+            'tests/UI/Logic/VideoPlayers/LibMpvLibraryPathTests.cs')
+          actual=$(git diff --name-only 18ee110d88f14881e70eff2096a791322bf785c5..HEAD)
+          test "$actual" = "$expected"
+          git diff --check 18ee110d88f14881e70eff2096a791322bf785c5..HEAD
+          python - <<'PY'
+          from pathlib import Path
+          assert Path("src/ui/Logic/VideoPlayers/LibMpvDynamic/LibMpvDynamicPlayer.cs").read_bytes().startswith(b"\xef\xbb\xbf")
+          PY
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Focused libmpv regressions
+        run: dotnet test tests/UI/UITests.csproj --filter "FullyQualifiedName~LibMpvLibraryPathTests"
+
+      - name: Full solution tests
+        run: dotnet test SubtitleEdit.sln
