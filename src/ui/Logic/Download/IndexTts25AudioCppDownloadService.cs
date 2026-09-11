@@ -98,6 +98,44 @@ public class IndexTts25AudioCppDownloadService : IIndexTts25AudioCppDownloadServ
     public async Task DownloadEngine(Stream stream, string backend, IProgress<float>? progress, CancellationToken cancellationToken)
     {
         await DownloadHelper.DownloadFileAsync(_httpClient, GetEngineUrl(backend), stream, progress, cancellationToken);
+        await VerifyEngineArchiveAsync(stream, backend, cancellationToken);
+    }
+
+    internal static async Task VerifyEngineArchiveAsync(Stream stream, string backend, CancellationToken cancellationToken)
+    {
+        var key = DownloadHashManager.ResolveIndexTts25AudioCppKey(backend);
+        if (string.IsNullOrEmpty(key))
+        {
+            throw new InvalidOperationException("No SHA-256 key is registered for the audio.cpp runtime on this platform/backend.");
+        }
+
+        var expected = DownloadHashManager.GetLatestKnownHash(key);
+        if (string.IsNullOrEmpty(expected))
+        {
+            throw new InvalidOperationException($"No SHA-256 is registered for audio.cpp runtime key '{key}'.");
+        }
+
+        if (!stream.CanRead || !stream.CanSeek)
+        {
+            throw new InvalidOperationException("audio.cpp runtime integrity verification requires a readable, seekable stream.");
+        }
+
+        string actual;
+        stream.Position = 0;
+        try
+        {
+            actual = await Sha256Util.ComputeSha256Async(stream, cancellationToken);
+        }
+        finally
+        {
+            stream.Position = 0;
+        }
+
+        if (!string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new IOException(
+                $"audio.cpp runtime download failed integrity check (expected SHA-256 {expected}, got {actual}).");
+        }
     }
 
     private static string GetEngineUrl(string backend)
