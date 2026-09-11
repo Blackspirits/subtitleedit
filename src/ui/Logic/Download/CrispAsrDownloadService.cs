@@ -4,6 +4,7 @@ using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
+using Nikse.SubtitleEdit.UiLogic;
 
 namespace Nikse.SubtitleEdit.Logic.Download;
 
@@ -64,69 +65,121 @@ public class CrispAsrDownloadService : ICrispAsrDownloadService
 
     public async Task DownloadEngine(Stream stream, IProgress<float>? progress, CancellationToken cancellationToken)
     {
-        await DownloadHelper.DownloadFileAsync(_httpClient, GetUrl(), stream, progress, cancellationToken);
+        var download = GetDefaultDownload();
+        await DownloadAndVerifyAsync(download.Url, download.HashKey, stream, progress, cancellationToken);
     }
 
     public async Task DownloadEngineWindowsCuda(Stream stream, IProgress<float>? progress, CancellationToken cancellationToken)
     {
-        await DownloadHelper.DownloadFileAsync(_httpClient, WindowsCudaUrl, stream, progress, cancellationToken);
+        await DownloadAndVerifyAsync(WindowsCudaUrl, DownloadHashManager.CrispAsr.WindowsCuda, stream, progress, cancellationToken);
     }
 
     public async Task DownloadEngineWindowsCuda13(Stream stream, IProgress<float>? progress, CancellationToken cancellationToken)
     {
-        await DownloadHelper.DownloadFileAsync(_httpClient, WindowsCuda13Url, stream, progress, cancellationToken);
+        await DownloadAndVerifyAsync(WindowsCuda13Url, DownloadHashManager.CrispAsr.WindowsCuda13, stream, progress, cancellationToken);
     }
 
     public async Task DownloadEngineWindowsVulkan(Stream stream, IProgress<float>? progress, CancellationToken cancellationToken)
     {
-        await DownloadHelper.DownloadFileAsync(_httpClient, WindowsVulkanUrl, stream, progress, cancellationToken);
+        await DownloadAndVerifyAsync(WindowsVulkanUrl, DownloadHashManager.CrispAsr.WindowsVulkan, stream, progress, cancellationToken);
     }
 
     public async Task DownloadEngineWindowsCpu(Stream stream, IProgress<float>? progress, CancellationToken cancellationToken)
     {
-        await DownloadHelper.DownloadFileAsync(_httpClient, WindowsCpuUrl, stream, progress, cancellationToken);
+        await DownloadAndVerifyAsync(WindowsCpuUrl, DownloadHashManager.CrispAsr.WindowsCpu, stream, progress, cancellationToken);
     }
 
     public async Task DownloadEngineWindowsCpuLegacy(Stream stream, IProgress<float>? progress, CancellationToken cancellationToken)
     {
-        await DownloadHelper.DownloadFileAsync(_httpClient, WindowsCpuLegacyUrl, stream, progress, cancellationToken);
+        await DownloadAndVerifyAsync(WindowsCpuLegacyUrl, DownloadHashManager.CrispAsr.WindowsCpuLegacy, stream, progress, cancellationToken);
     }
 
     public async Task DownloadEngineLinuxCuda(Stream stream, IProgress<float>? progress, CancellationToken cancellationToken)
     {
-        await DownloadHelper.DownloadFileAsync(_httpClient, LinuxCudaUrl, stream, progress, cancellationToken);
+        await DownloadAndVerifyAsync(LinuxCudaUrl, DownloadHashManager.CrispAsr.LinuxCuda, stream, progress, cancellationToken);
     }
 
     public async Task DownloadEngineLinuxCuda13(Stream stream, IProgress<float>? progress, CancellationToken cancellationToken)
     {
-        await DownloadHelper.DownloadFileAsync(_httpClient, LinuxCuda13Url, stream, progress, cancellationToken);
+        await DownloadAndVerifyAsync(LinuxCuda13Url, DownloadHashManager.CrispAsr.LinuxCuda13, stream, progress, cancellationToken);
     }
 
     public async Task DownloadEngineLinuxVulkan(Stream stream, IProgress<float>? progress, CancellationToken cancellationToken)
     {
-        await DownloadHelper.DownloadFileAsync(_httpClient, LinuxVulkanUrl, stream, progress, cancellationToken);
+        await DownloadAndVerifyAsync(LinuxVulkanUrl, DownloadHashManager.CrispAsr.LinuxVulkan, stream, progress, cancellationToken);
     }
 
     public async Task DownloadEngineLinuxHip(Stream stream, IProgress<float>? progress, CancellationToken cancellationToken)
     {
-        await DownloadHelper.DownloadFileAsync(_httpClient, LinuxHipUrl, stream, progress, cancellationToken);
+        await DownloadAndVerifyAsync(LinuxHipUrl, DownloadHashManager.CrispAsr.LinuxHip, stream, progress, cancellationToken);
     }
 
-    private static string GetUrl()
+    private async Task DownloadAndVerifyAsync(
+        string url,
+        string hashKey,
+        Stream stream,
+        IProgress<float>? progress,
+        CancellationToken cancellationToken)
+    {
+        await DownloadHelper.DownloadFileAsync(_httpClient, url, stream, progress, cancellationToken);
+        await VerifyArchiveAsync(stream, hashKey, cancellationToken);
+    }
+
+    internal static async Task VerifyArchiveAsync(Stream stream, string? hashKey, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(hashKey))
+        {
+            throw new InvalidOperationException("No SHA-256 key is registered for the Crisp ASR runtime.");
+        }
+
+        var expected = DownloadHashManager.GetLatestKnownHash(hashKey);
+        if (string.IsNullOrEmpty(expected))
+        {
+            throw new InvalidOperationException($"No SHA-256 is registered for Crisp ASR runtime key '{hashKey}'.");
+        }
+
+        if (!stream.CanRead || !stream.CanSeek)
+        {
+            throw new InvalidOperationException("Crisp ASR runtime integrity verification requires a readable, seekable stream.");
+        }
+
+        string actual;
+        stream.Position = 0;
+        try
+        {
+            actual = await Sha256Util.ComputeSha256Async(stream, cancellationToken);
+        }
+        finally
+        {
+            stream.Position = 0;
+        }
+
+        if (!string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new IOException(
+                $"Crisp ASR runtime download failed integrity check (expected SHA-256 {expected}, got {actual}).");
+        }
+    }
+
+    private static (string Url, string HashKey) GetDefaultDownload()
     {
         if (OperatingSystem.IsWindows())
         {
-            return WindowsVulkanUrl;
+            return (WindowsVulkanUrl, DownloadHashManager.CrispAsr.WindowsVulkan);
         }
 
         if (OperatingSystem.IsLinux())
         {
-            return RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? LinuxArmUrl : LinuxUrl;
+            return RuntimeInformation.ProcessArchitecture == Architecture.Arm64
+                ? (LinuxArmUrl, DownloadHashManager.CrispAsr.LinuxArm)
+                : (LinuxUrl, DownloadHashManager.CrispAsr.Linux);
         }
 
         if (OperatingSystem.IsMacOS())
         {
-            return RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? MacUrl : MacIntelUrl;
+            return RuntimeInformation.ProcessArchitecture == Architecture.Arm64
+                ? (MacUrl, DownloadHashManager.CrispAsr.MacOs)
+                : (MacIntelUrl, DownloadHashManager.CrispAsr.MacOsX64);
         }
 
         throw new PlatformNotSupportedException();
