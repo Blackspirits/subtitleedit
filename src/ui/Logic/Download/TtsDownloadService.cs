@@ -15,6 +15,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using Nikse.SubtitleEdit.UiLogic;
 
 namespace Nikse.SubtitleEdit.Logic.Download;
 
@@ -91,23 +92,99 @@ public class TtsDownloadService : ITtsDownloadService
 
     public async Task DownloadPiper(string destinationFileName, IProgress<float>? progress, CancellationToken cancellationToken)
     {
-        var url = OperatingSystem.IsWindows() ? WindowsPiperUrl : MacPiperUrl;
-        await DownloadHelper.DownloadFileAsync(_httpClient, url, destinationFileName, progress, cancellationToken);
+        await DownloadHelper.DownloadFileAsync(_httpClient, GetPiperUrl(), destinationFileName, progress, cancellationToken);
+        await VerifyPiperFileAsync(destinationFileName, cancellationToken);
     }
 
     public async Task DownloadPiper(Stream stream, IProgress<float>? progress, CancellationToken cancellationToken)
     {
-        var url = WindowsPiperUrl;
-        if (OperatingSystem.IsLinux())
+        await DownloadHelper.DownloadFileAsync(_httpClient, GetPiperUrl(), stream, progress, cancellationToken);
+        await VerifyPiperArchiveAsync(stream, cancellationToken);
+    }
+
+    private static string GetPiperUrl()
+    {
+        if (OperatingSystem.IsWindows())
         {
-            url = RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? LinuxPiperArmUrl : LinuxPiperUrl;
-        }
-        else if (OperatingSystem.IsMacOS())
-        {
-            url = MacPiperUrl;
+            return WindowsPiperUrl;
         }
 
-        await DownloadHelper.DownloadFileAsync(_httpClient, url, stream, progress, cancellationToken);
+        if (OperatingSystem.IsLinux())
+        {
+            return RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? LinuxPiperArmUrl : LinuxPiperUrl;
+        }
+
+        if (OperatingSystem.IsMacOS())
+        {
+            return MacPiperUrl;
+        }
+
+        throw new PlatformNotSupportedException();
+    }
+
+    internal static async Task VerifyPiperArchiveAsync(Stream stream, CancellationToken cancellationToken)
+    {
+        var key = DownloadHashManager.ResolvePiperKey();
+        if (string.IsNullOrEmpty(key))
+        {
+            throw new InvalidOperationException("No SHA-256 key is registered for the Piper runtime on this platform.");
+        }
+
+        var expected = DownloadHashManager.GetLatestKnownHash(key);
+        if (string.IsNullOrEmpty(expected))
+        {
+            throw new InvalidOperationException($"No SHA-256 is registered for Piper runtime key '{key}'.");
+        }
+
+        if (!stream.CanRead || !stream.CanSeek)
+        {
+            throw new InvalidOperationException("Piper runtime integrity verification requires a readable, seekable stream.");
+        }
+
+        string actual;
+        stream.Position = 0;
+        try
+        {
+            actual = await Sha256Util.ComputeSha256Async(stream, cancellationToken);
+        }
+        finally
+        {
+            stream.Position = 0;
+        }
+
+        if (!string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new IOException(
+                $"Piper runtime download failed integrity check (expected SHA-256 {expected}, got {actual}).");
+        }
+    }
+
+    internal static async Task VerifyPiperFileAsync(string fileName, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var stream = new FileStream(
+                fileName,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                bufferSize: 4096,
+                useAsync: true);
+            await VerifyPiperArchiveAsync(stream, cancellationToken);
+        }
+        catch
+        {
+            try
+            {
+                File.Delete(fileName);
+            }
+            catch
+            {
+                // Preserve the integrity error; cleanup is best-effort.
+            }
+
+            throw;
+        }
     }
 
     public async Task DownloadPiperModel(string destinationFileName, PiperVoice voice, IProgress<float>? progress, CancellationToken cancellationToken)
