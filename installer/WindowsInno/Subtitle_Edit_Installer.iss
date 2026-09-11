@@ -153,7 +153,8 @@ Name: {userdesktop}\Subtitle Edit;   Filename: {app}\SubtitleEdit.exe; WorkingDi
 [InstallDelete]
 Type: files; Name: {userdesktop}\Subtitle Edit.lnk;   Check: not WizardIsTaskSelected('desktopicon\user')   and WasPreviousVersionInstalled()
 Type: files; Name: {commondesktop}\Subtitle Edit.lnk; Check: not WizardIsTaskSelected('desktopicon\common') and WasPreviousVersionInstalled()
-Type: files; Name: {userappdata}\Subtitle Edit\Settings.xml; Tasks: reset_settings
+Type: files; Name: {userappdata}\Subtitle Edit\Settings.json; Tasks: reset_settings
+Type: files; Name: {userappdata}\Subtitle Edit\Settings.xml;  Tasks: reset_settings
 
 
 [Run]
@@ -281,7 +282,9 @@ end;
 
 function SettingsExist(): Boolean;
 begin
-  Result := FileExists(ExpandConstant('{userappdata}\Subtitle Edit\Settings.xml'));
+  Result :=
+    FileExists(ExpandConstant('{userappdata}\Subtitle Edit\Settings.json')) or
+    FileExists(ExpandConstant('{userappdata}\Subtitle Edit\Settings.xml'));
 end;
 
 
