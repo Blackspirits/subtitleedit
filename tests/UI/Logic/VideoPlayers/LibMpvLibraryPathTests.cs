@@ -54,4 +54,23 @@ public class LibMpvLibraryPathTests
     }
 
 
+    [Fact]
+    public void ShouldAttemptLibraryLoad_DefaultLoaderSentinel_DoesNotRequireLocalFile()
+    {
+        var missing = Path.Combine(Path.GetTempPath(), "missing-" + Guid.NewGuid().ToString("N"), "libmpv-2.dll");
+
+        Assert.False(File.Exists(missing));
+        Assert.True(LibMpvDynamicPlayer.ShouldAttemptLibraryLoad(string.Empty, missing));
+    }
+
+    [Fact]
+    public void ShouldAttemptLibraryLoad_ExplicitRoot_RequiresExistingFile()
+    {
+        var missing = Path.Combine(Path.GetTempPath(), "missing-" + Guid.NewGuid().ToString("N"), "libmpv-2.dll");
+
+        Assert.False(File.Exists(missing));
+        Assert.False(LibMpvDynamicPlayer.ShouldAttemptLibraryLoad(Path.GetDirectoryName(missing)!, missing));
+    }
+
+
 }

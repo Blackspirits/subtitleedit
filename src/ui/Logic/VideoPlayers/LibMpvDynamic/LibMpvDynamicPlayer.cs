@@ -497,6 +497,13 @@ public sealed class LibMpvDynamicPlayer : IDisposable, IVideoPlayer
         return address != IntPtr.Zero ? Marshal.GetDelegateForFunctionPointer(address, type) : null;
     }
 
+    internal static bool ShouldAttemptLibraryLoad(string libraryPath, string fullPath)
+    {
+        // The empty Windows root is a sentinel for the platform loader's normal search path.
+        // Do not pre-empt that fallback with File.Exists(), which only checks the process CWD.
+        return string.IsNullOrEmpty(libraryPath) || File.Exists(fullPath);
+    }
+
     private bool LoadLibraryInternal()
     {
         foreach (var libName in GetLibraryNames())
@@ -504,16 +511,18 @@ public sealed class LibMpvDynamicPlayer : IDisposable, IVideoPlayer
             foreach (var libPath in GetLibraryPaths())
             {
                 var fullPath = Path.Combine(libPath, libName);
-                if (File.Exists(fullPath))
+                if (!ShouldAttemptLibraryLoad(libPath, fullPath))
                 {
-                    var libHandle = NativeMethods.CrossLoadLibrary(fullPath);
-                    if (libHandle != IntPtr.Zero)
-                    {
-                        _library = libHandle;
-                        LoadLibMpvMethods();
-                        _mpv = _mpvCreate!.Invoke();
-                        return true;
-                    }
+                    continue;
+                }
+
+                var libHandle = NativeMethods.CrossLoadLibrary(fullPath);
+                if (libHandle != IntPtr.Zero)
+                {
+                    _library = libHandle;
+                    LoadLibMpvMethods();
+                    _mpv = _mpvCreate!.Invoke();
+                    return true;
                 }
             }
         }
