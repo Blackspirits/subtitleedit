@@ -21,6 +21,14 @@ public class PaddleOcrDownloadVerifierTests
     }
 
     [Fact]
+    public void GetExpectedHash_SameFileNameFromDifferentOrigin_IsUnknown()
+    {
+        const string url = "https://example.invalid/PaddleOCR-CPU-v3.7.0.7z";
+
+        Assert.Null(PaddleOcrDownloadVerifier.GetExpectedHash(url));
+    }
+
+    [Fact]
     public async Task DownloadAndVerifyAsync_UnknownAsset_FailsClosedBeforeHttp()
     {
         var handler = new StaticResponseHandler(Encoding.ASCII.GetBytes("unused"));
