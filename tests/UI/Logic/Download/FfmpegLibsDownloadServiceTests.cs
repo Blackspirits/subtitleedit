@@ -37,7 +37,7 @@ public class FfmpegLibsDownloadServiceTests
                     TestContext.Current.CancellationToken));
 
             Assert.False(File.Exists(destination));
-            Assert.Equal(1, handler.RequestCount);
+            Assert.Equal(new[] { HttpMethod.Head, HttpMethod.Get }, handler.RequestMethods);
         }
         finally
         {
@@ -68,7 +68,7 @@ public class FfmpegLibsDownloadServiceTests
 
             Assert.True(File.Exists(destination));
             Assert.Equal(payload, await File.ReadAllBytesAsync(destination, TestContext.Current.CancellationToken));
-            Assert.Equal(1, handler.RequestCount);
+            Assert.Equal(new[] { HttpMethod.Head, HttpMethod.Get }, handler.RequestMethods);
         }
         finally
         {
@@ -95,17 +95,17 @@ public class FfmpegLibsDownloadServiceTests
                 progress: null,
                 TestContext.Current.CancellationToken));
 
-        Assert.Equal(0, handler.RequestCount);
+        Assert.Empty(handler.RequestMethods);
         Assert.False(File.Exists(destination));
     }
 
     private sealed class StaticResponseHandler(byte[] payload) : HttpMessageHandler
     {
-        public int RequestCount { get; private set; }
+        public List<HttpMethod> RequestMethods { get; } = new();
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            RequestCount++;
+            RequestMethods.Add(request.Method);
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new ByteArrayContent(payload),
