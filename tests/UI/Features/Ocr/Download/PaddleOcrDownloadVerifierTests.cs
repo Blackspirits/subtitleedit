@@ -1,3 +1,4 @@
+using Nikse.SubtitleEdit.Features.Ocr;
 using Nikse.SubtitleEdit.Features.Ocr.Download;
 using System.Net;
 using System.Text;
@@ -18,6 +19,18 @@ public class PaddleOcrDownloadVerifierTests
     public void GetExpectedHash_MatchesPublishedReleaseDigest(string url, string expected)
     {
         Assert.Equal(expected, PaddleOcrDownloadVerifier.GetExpectedHash(url));
+    }
+
+    [Fact]
+    public void EveryConfiguredArchiveUrl_HasPinnedSha256()
+    {
+        foreach (var downloadType in Enum.GetValues<PaddleOcrDownloadType>())
+        {
+            foreach (var url in PaddleOcr.GetArchive(downloadType).Urls)
+            {
+                Assert.False(string.IsNullOrEmpty(PaddleOcrDownloadVerifier.GetExpectedHash(url)), url);
+            }
+        }
     }
 
     [Fact]
