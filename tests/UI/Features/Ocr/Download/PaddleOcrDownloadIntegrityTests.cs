@@ -34,6 +34,12 @@ public class PaddleOcrDownloadIntegrityTests
     }
 
     [Fact]
+    public void SameFileNameFromDifferentOrigin_IsUnknown()
+    {
+        Assert.Null(PaddleOcrDownloadIntegrity.GetExpectedHash("https://example.invalid/PaddleOCR-CPU-v3.7.0.7z"));
+    }
+
+    [Fact]
     public async Task DownloadAndVerifyAsync_TamperedPayload_DeletesFileAndFails()
     {
         var temp = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".7z");
