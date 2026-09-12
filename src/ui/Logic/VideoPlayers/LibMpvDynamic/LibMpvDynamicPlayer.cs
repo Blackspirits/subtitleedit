@@ -365,16 +365,57 @@ public sealed class LibMpvDynamicPlayer : IDisposable, IVideoPlayer
         }
     }
 
+    internal static string[] GetWindowsLibraryPaths(
+        string mpvPath,
+        string dataFolder,
+        string baseDirectory,
+        string currentDirectory)
+    {
+        var paths = new List<string>();
+        var comparisonPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void AddPath(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+            {
+                if (comparisonPaths.Add(string.Empty))
+                {
+                    paths.Add(path);
+                }
+
+                return;
+            }
+
+            var comparisonPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+            if (comparisonPaths.Add(comparisonPath))
+            {
+                paths.Add(path);
+            }
+        }
+
+        // A configured override wins. The per-user data folder comes next so a downloaded
+        // libmpv can override the installer/portable baseline without administrator rights.
+        if (!string.IsNullOrWhiteSpace(mpvPath))
+        {
+            AddPath(mpvPath);
+        }
+
+        AddPath(dataFolder);
+        AddPath(baseDirectory);
+        AddPath(currentDirectory);
+        AddPath(string.Empty);
+        return paths.ToArray();
+    }
+
     private static string[] GetLibraryPaths()
     {
         if (OperatingSystem.IsWindows())
         {
-            return
-            [
+            return GetWindowsLibraryPaths(
                 MpvPath,
-                Directory.GetCurrentDirectory(),
-                string.Empty,
-            ];
+                Se.DataFolder,
+                AppContext.BaseDirectory,
+                Directory.GetCurrentDirectory());
         }
         else if (OperatingSystem.IsLinux())
         {
@@ -456,6 +497,13 @@ public sealed class LibMpvDynamicPlayer : IDisposable, IVideoPlayer
         return address != IntPtr.Zero ? Marshal.GetDelegateForFunctionPointer(address, type) : null;
     }
 
+    internal static bool ShouldAttemptLibraryLoad(string libraryPath, string fullPath)
+    {
+        // The empty Windows root is a sentinel for the platform loader's normal search path.
+        // Do not pre-empt that fallback with File.Exists(), which only checks the process CWD.
+        return string.IsNullOrEmpty(libraryPath) || File.Exists(fullPath);
+    }
+
     private bool LoadLibraryInternal()
     {
         foreach (var libName in GetLibraryNames())
@@ -463,16 +511,18 @@ public sealed class LibMpvDynamicPlayer : IDisposable, IVideoPlayer
             foreach (var libPath in GetLibraryPaths())
             {
                 var fullPath = Path.Combine(libPath, libName);
-                if (File.Exists(fullPath))
+                if (!ShouldAttemptLibraryLoad(libPath, fullPath))
                 {
-                    var libHandle = NativeMethods.CrossLoadLibrary(fullPath);
-                    if (libHandle != IntPtr.Zero)
-                    {
-                        _library = libHandle;
-                        LoadLibMpvMethods();
-                        _mpv = _mpvCreate!.Invoke();
-                        return true;
-                    }
+                    continue;
+                }
+
+                var libHandle = NativeMethods.CrossLoadLibrary(fullPath);
+                if (libHandle != IntPtr.Zero)
+                {
+                    _library = libHandle;
+                    LoadLibMpvMethods();
+                    _mpv = _mpvCreate!.Invoke();
+                    return true;
                 }
             }
         }
