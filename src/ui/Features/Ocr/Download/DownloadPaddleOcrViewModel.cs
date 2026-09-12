@@ -100,7 +100,7 @@ public partial class DownloadPaddleOcrViewModel : ObservableObject, IClosingClea
                         ProgressText = $"Starting download {_downloadTaskIndex + 1} of {_downloadTaskUrls.Count}...";
                         var url = _downloadTaskUrls[_downloadTaskIndex];
                         var fileName = Path.Combine(_tempFolder, Path.GetFileName(url));
-                        _downloadTask = DownloadHelper.DownloadFileAsync(HttpClientFactoryWithProxy.CreateHttpClientWithProxy(), url, fileName, new Progress<float>(number =>
+                        _downloadTask = PaddleOcrDownloadIntegrity.DownloadAndVerifyAsync(HttpClientFactoryWithProxy.CreateHttpClientWithProxy(), url, fileName, new Progress<float>(number =>
                         {
                             var percentage = (int)Math.Round(number * 100.0, MidpointRounding.AwayFromZero);
                             var pctString = percentage.ToString(CultureInfo.InvariantCulture);
@@ -326,7 +326,7 @@ public partial class DownloadPaddleOcrViewModel : ObservableObject, IClosingClea
         _downloadTaskUrls.AddRange(urls);
         var firstUrl = _downloadTaskUrls[_downloadTaskIndex];
         var firstFileName = Path.Combine(_tempFolder, Path.GetFileName(firstUrl));
-        _downloadTask = DownloadHelper.DownloadFileAsync(HttpClientFactoryWithProxy.CreateHttpClientWithProxy(), firstUrl, firstFileName, downloadProgress, _cancellationTokenSource.Token);
+        _downloadTask = PaddleOcrDownloadIntegrity.DownloadAndVerifyAsync(HttpClientFactoryWithProxy.CreateHttpClientWithProxy(), firstUrl, firstFileName, downloadProgress, _cancellationTokenSource.Token);
 
         _timer.Elapsed += OnTimerOnElapsed;
         _timer.Start();
