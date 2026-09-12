@@ -139,6 +139,7 @@ Source: {#bindir}\libSkiaSharp.dll;      DestDir: {app}; Flags: ignoreversion
 Source: ..\..\change-log.txt;            DestDir: {app}; Flags: ignoreversion
 Source: ..\LICENSE.rtf;                  DestDir: {app}; Flags: ignoreversion
 Source: {#bindir}\libmpv-2.dll;          DestDir: {userappdata}\Subtitle Edit; Flags: ignoreversion
+Source: ..\..\libmpv-temp\vulkan-1.dll; DestDir: {userappdata}\Subtitle Edit; Flags: ignoreversion
 
 [Icons]
 Name: {group}\Subtitle Edit;                             Filename: {app}\SubtitleEdit.exe; WorkingDir: {app}; Comment: Subtitle Edit {#app_ver_display}; AppUserModelID: Nikse.SubtitleEdit5; IconFilename: {app}\SubtitleEdit.exe; IconIndex: 0
