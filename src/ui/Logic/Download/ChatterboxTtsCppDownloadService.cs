@@ -46,8 +46,10 @@ public class ChatterboxTtsCppDownloadService : IChatterboxTtsCppDownloadService
     public const string TurboT3FileName = "chatterbox-turbo-t3-q8_0.gguf";
     public const string TurboS3GenFileName = "chatterbox-turbo-s3gen-q8_0.gguf";
 
-    private const string BaseRepoUrl = "https://huggingface.co/cstr/chatterbox-GGUF/resolve/main";
-    private const string TurboRepoUrl = "https://huggingface.co/cstr/chatterbox-turbo-GGUF/resolve/main";
+    internal const string BaseRepoRevision = "c45504bb8d55473a2213db17ec472ed11b69056a";
+    internal const string TurboRepoRevision = "b544cf8b49504d880640864a757b3ff3e4421a42";
+    private const string BaseRepoName = "cstr/chatterbox-GGUF";
+    private const string TurboRepoName = "cstr/chatterbox-turbo-GGUF";
 
     // Back-compat aliases for callers that still want the Base file names without
     // resolving via ResolveModelKey.
@@ -105,6 +107,58 @@ public class ChatterboxTtsCppDownloadService : IChatterboxTtsCppDownloadService
     public static string GetBackendName(string? modelKey) =>
         ResolveModelKey(modelKey) == ModelKeyTurbo ? "chatterbox-turbo" : "chatterbox";
 
+
+    internal static string GetModelUrl(string modelKey, string fileName)
+    {
+        var resolved = ResolveModelKey(modelKey);
+        var repoName = resolved == ModelKeyTurbo ? TurboRepoName : BaseRepoName;
+        var revision = resolved == ModelKeyTurbo ? TurboRepoRevision : BaseRepoRevision;
+        return $"https://huggingface.co/{repoName}/resolve/{revision}/{fileName}";
+    }
+
+    internal static async Task DownloadAndPublishModelAsync(
+        HttpClient httpClient,
+        string url,
+        string destinationFileName,
+        IProgress<float>? progress,
+        CancellationToken cancellationToken)
+    {
+        var tempFileName = destinationFileName + ".part";
+        try
+        {
+            if (File.Exists(tempFileName))
+            {
+                File.Delete(tempFileName);
+            }
+
+            await DownloadHelper.DownloadFileAsync(
+                httpClient,
+                url,
+                tempFileName,
+                progress,
+                cancellationToken);
+
+            cancellationToken.ThrowIfCancellationRequested();
+            File.Move(tempFileName, destinationFileName, true);
+        }
+        catch
+        {
+            try
+            {
+                if (File.Exists(tempFileName))
+                {
+                    File.Delete(tempFileName);
+                }
+            }
+            catch
+            {
+                // Preserve the original download/cancellation error; cleanup is best-effort.
+            }
+
+            throw;
+        }
+    }
+
     /// <summary>
     /// The unversioned Base GGUFs the <c>chatterbox-v3-*</c> pair replaced. Nothing reads these
     /// any more, so they are pure dead weight on disk — up to ~3.4 GB for a user who had all
@@ -156,9 +210,8 @@ public class ChatterboxTtsCppDownloadService : IChatterboxTtsCppDownloadService
         var resolved = ResolveModelKey(modelKey);
         var t3FileName = GetT3FileName(resolved);
         var s3genFileName = GetS3GenFileName(resolved);
-        var repoUrl = resolved == ModelKeyTurbo ? TurboRepoUrl : BaseRepoUrl;
-        var t3Url = $"{repoUrl}/{t3FileName}";
-        var s3genUrl = $"{repoUrl}/{s3genFileName}";
+        var t3Url = GetModelUrl(resolved, t3FileName);
+        var s3genUrl = GetModelUrl(resolved, s3genFileName);
 
         var t3Path = Path.Combine(modelsFolder, t3FileName);
         var s3genPath = Path.Combine(modelsFolder, s3genFileName);
@@ -171,13 +224,13 @@ public class ChatterboxTtsCppDownloadService : IChatterboxTtsCppDownloadService
         {
             step++;
             titleProgress?.Invoke($"Downloading Chatterbox TTS models ({step}/{total}): {t3FileName}");
-            await DownloadHelper.DownloadFileAsync(_httpClient, t3Url, t3Path, progress, cancellationToken);
+            await DownloadAndPublishModelAsync(_httpClient, t3Url, t3Path, progress, cancellationToken);
         }
         if (needS3Gen)
         {
             step++;
             titleProgress?.Invoke($"Downloading Chatterbox TTS models ({step}/{total}): {s3genFileName}");
-            await DownloadHelper.DownloadFileAsync(_httpClient, s3genUrl, s3genPath, progress, cancellationToken);
+            await DownloadAndPublishModelAsync(_httpClient, s3genUrl, s3genPath, progress, cancellationToken);
         }
 
         // The V3 pair replaced the unversioned Base GGUFs, so once it is on disk the old ones are
