@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using Nikse.SubtitleEdit.Features.Ocr;
 using Nikse.SubtitleEdit.Features.Ocr.Download;
+using UITests.Features.Ocr.Engines;
 
 namespace UITests.Features.Ocr.Download;
 
