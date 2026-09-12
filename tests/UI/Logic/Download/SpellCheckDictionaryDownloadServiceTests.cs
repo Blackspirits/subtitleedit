@@ -27,6 +27,14 @@ public class SpellCheckDictionaryDownloadServiceTests
     }
 
     [Fact]
+    public void FutureVoikkoRelease_FailsClosedUntilHashesAreRegistered()
+    {
+        Assert.Throws<InvalidOperationException>(() =>
+            SpellCheckDictionaryDownloadService.GetExpectedVoikkoHash(
+                "https://github.com/SubtitleEdit/support-files/releases/download/voikko-5.0-fi-2026-09/dict.zip"));
+    }
+
+    [Fact]
     public void PinnedVoikkoPathOnWrongOrigin_FailsClosed()
     {
         Assert.Throws<InvalidOperationException>(() =>
