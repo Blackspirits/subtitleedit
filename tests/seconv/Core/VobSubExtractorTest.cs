@@ -79,4 +79,37 @@ public class VobSubExtractorTest : IDisposable
         // No "input file too large" leak.
         Assert.DoesNotContain("too large", result.Errors[0]);
     }
+
+    [Fact]
+    public void EnsureOutputFilesCanBeWritten_MultiStream_NoOverwrite_ProtectsNumberedOutputs()
+    {
+        var outputBase = Path.Combine(_tempRoot, "movie.sub");
+        var outputPaths = VobSubExtractor.BuildOutputPaths(outputBase, 2);
+        Assert.Equal(Path.Combine(_tempRoot, "movie.0.sub"), outputPaths[0]);
+        Assert.Equal(Path.Combine(_tempRoot, "movie.1.sub"), outputPaths[1]);
+
+        var existing = Path.ChangeExtension(outputPaths[1], ".idx");
+        File.WriteAllText(existing, "keep-me");
+
+        var ex = Assert.Throws<IOException>(() =>
+            VobSubExtractor.EnsureOutputFilesCanBeWritten(outputPaths, overwrite: false));
+
+        Assert.Contains(existing, ex.Message);
+        Assert.Equal("keep-me", File.ReadAllText(existing));
+        Assert.False(File.Exists(outputPaths[0]));
+        Assert.False(File.Exists(outputPaths[1]));
+    }
+
+    [Fact]
+    public void EnsureOutputFilesCanBeWritten_MultiStream_DoesNotBlockUnusedBasePath()
+    {
+        var outputBase = Path.Combine(_tempRoot, "movie.sub");
+        File.WriteAllText(outputBase, "unrelated-existing-base");
+
+        var outputPaths = VobSubExtractor.BuildOutputPaths(outputBase, 2);
+        VobSubExtractor.EnsureOutputFilesCanBeWritten(outputPaths, overwrite: false);
+
+        Assert.Equal("unrelated-existing-base", File.ReadAllText(outputBase));
+    }
+
 }
