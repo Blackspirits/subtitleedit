@@ -197,6 +197,11 @@ public class YtDlpDownloadService : IYtDlpDownloadService
     internal static async Task VerifyChecksumAsync(string filePath, string version, CancellationToken cancellationToken)
     {
         var assetName = Path.GetFileName(filePath);
+        if (assetName.EndsWith(".part", StringComparison.Ordinal))
+        {
+            assetName = assetName[..^".part".Length];
+        }
+
         if (!KnownSha256.TryGetValue(version, out var byAsset) ||
             !byAsset.TryGetValue(assetName, out var expected))
         {
