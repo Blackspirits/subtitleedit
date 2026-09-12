@@ -150,6 +150,7 @@ public class KokoroTtsCppDownloadService : IKokoroTtsCppDownloadService
                     $"(expected SHA-256 {expectedSha256}, got {actual}).");
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             File.Move(tempFileName, destinationFileName, true);
         }
         catch
