@@ -22,7 +22,7 @@ public class SettingsBackupTests
     [Fact]
     public void ParseSettingsBackupTime_ReadsTheFileNamePrefix()
     {
-        var time = AutoBackupService.ParseSettingsBackupTime(@"C:\x\2026-09-12_08-30-05_Settings.json");
+        var time = AutoBackupService.ParseSettingsBackupTime(Path.Combine("x", "2026-09-12_08-30-05_Settings.json"));
 
         Assert.Equal(new DateTime(2026, 9, 12, 8, 30, 5), time);
         Assert.Null(AutoBackupService.ParseSettingsBackupTime("Settings.json"));
