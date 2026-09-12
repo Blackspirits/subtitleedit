@@ -78,7 +78,7 @@ public class ChatterboxTtsCppDownloadServiceTests
         {
             using var httpClient = new HttpClient(new FailingGetHandler());
 
-            await Assert.ThrowsAsync<HttpRequestException>(() =>
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 ChatterboxTtsCppDownloadService.DownloadAndPublishModelAsync(
                     httpClient,
                     "https://example.test/model.gguf",
@@ -86,6 +86,7 @@ public class ChatterboxTtsCppDownloadServiceTests
                     progress: null,
                     TestContext.Current.CancellationToken));
 
+            Assert.IsType<HttpRequestException>(exception.InnerException);
             Assert.Equal(
                 existingPayload,
                 await File.ReadAllBytesAsync(destination, TestContext.Current.CancellationToken));
