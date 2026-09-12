@@ -28,8 +28,10 @@ public class OmniVoiceDownloadService : IOmniVoiceDownloadService
     public const string WindowsVariantVulkan = "vulkan";
     public const string WindowsVariantCuda = "cuda";
 
-    private const string ModelBaseUrl = "https://huggingface.co/Serveurperso/OmniVoice-GGUF/resolve/main/omnivoice-base-Q8_0.gguf";
-    private const string ModelTokenizerUrl = "https://huggingface.co/Serveurperso/OmniVoice-GGUF/resolve/main/omnivoice-tokenizer-F32.gguf";
+    internal const string ModelRepoRevision = "017094167b5c9ed565a5076ac9b3b93c5ecf5c73";
+    internal const string ModelBaseSha256 = "2882d887921798aea13d45236556bdf8012842ab6f8cd2690943eead6289f298";
+    internal const string ModelTokenizerSha256 = "83820c6316da023076af7c1d06de5e38dcd09ae9f42203675bf8b3bd9a58e330";
+    private const string ModelRepoBaseUrl = "https://huggingface.co/Serveurperso/OmniVoice-GGUF/resolve/" + ModelRepoRevision + "/";
 
     // omnivoice.cpp release pin. Bump in lockstep with the hashes in DownloadHashManager.OmniVoice
     // (each new release: prepend the new SHA-256 at index 0, keep the previous one for "update available").
@@ -63,13 +65,90 @@ public class OmniVoiceDownloadService : IOmniVoiceDownloadService
         {
             step++;
             titleProgress?.Invoke($"Downloading OmniVoice TTS models ({step}/{total}): {ModelBaseFileName}");
-            await DownloadHelper.DownloadFileAsync(_httpClient, ModelBaseUrl, basePath, progress, cancellationToken);
+            await DownloadAndPublishModelAsync(
+                _httpClient,
+                GetModelUrl(ModelBaseFileName),
+                basePath,
+                ModelBaseSha256,
+                progress,
+                cancellationToken);
         }
         if (needTokenizer)
         {
             step++;
             titleProgress?.Invoke($"Downloading OmniVoice TTS models ({step}/{total}): {ModelTokenizerFileName}");
-            await DownloadHelper.DownloadFileAsync(_httpClient, ModelTokenizerUrl, tokenizerPath, progress, cancellationToken);
+            await DownloadAndPublishModelAsync(
+                _httpClient,
+                GetModelUrl(ModelTokenizerFileName),
+                tokenizerPath,
+                ModelTokenizerSha256,
+                progress,
+                cancellationToken);
+        }
+    }
+
+    internal static string GetModelUrl(string fileName) => ModelRepoBaseUrl + fileName;
+
+    internal static async Task DownloadAndPublishModelAsync(
+        HttpClient httpClient,
+        string url,
+        string destinationFileName,
+        string expectedSha256,
+        IProgress<float>? progress,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(expectedSha256))
+        {
+            throw new InvalidOperationException(
+                $"No SHA-256 is registered for OmniVoice model '{Path.GetFileName(destinationFileName)}'.");
+        }
+
+        var tempFileName = destinationFileName + ".part";
+        try
+        {
+            if (File.Exists(tempFileName))
+            {
+                File.Delete(tempFileName);
+            }
+
+            await DownloadHelper.DownloadFileAsync(
+                httpClient,
+                url,
+                tempFileName,
+                progress,
+                cancellationToken);
+
+            string actual;
+            await using (var stream = File.OpenRead(tempFileName))
+            {
+                actual = await Sha256Util.ComputeSha256Async(stream, cancellationToken);
+            }
+
+            if (!string.Equals(expectedSha256, actual, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new IOException(
+                    $"OmniVoice model {Path.GetFileName(destinationFileName)} failed integrity check " +
+                    $"(expected SHA-256 {expectedSha256}, got {actual}).");
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            File.Move(tempFileName, destinationFileName, true);
+        }
+        catch
+        {
+            try
+            {
+                if (File.Exists(tempFileName))
+                {
+                    File.Delete(tempFileName);
+                }
+            }
+            catch
+            {
+                // Preserve the original download/integrity error; cleanup is best-effort.
+            }
+
+            throw;
         }
     }
 
