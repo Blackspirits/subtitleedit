@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Nikse.SubtitleEdit.Logic.Compression;
 using Nikse.SubtitleEdit.Logic.Config;
+using Nikse.SubtitleEdit.UiLogic;
 
 namespace Nikse.SubtitleEdit.Logic.Download;
 
@@ -18,6 +19,7 @@ public class TesseractDownloadService : ITesseractDownloadService
 {
     private readonly HttpClient _httpClient;
     private const string WindowsUrl = "https://github.com/SubtitleEdit/support-files/releases/download/tesseract553/Tesseract553.zip";
+    internal const string WindowsArchiveSha256 = "fef2dbb1de8f25d660301c17aff107c0d9b0dc99e0d4f0eee938eb7238d7d2dc";
 
     /// <summary>Tesseract version behind <see cref="WindowsUrl"/>; stamped into the install folder.</summary>
     public const string WindowsVersion = "5.5.3";
@@ -49,12 +51,53 @@ public class TesseractDownloadService : ITesseractDownloadService
 
     public async Task DownloadTesseract(Stream stream, IProgress<float>? progress, CancellationToken cancellationToken)
     {
-        await DownloadHelper.DownloadFileAsync(_httpClient, GetTesseractUrl(), stream, progress, cancellationToken);
+        await DownloadAndVerifyRuntimeAsync(
+            _httpClient,
+            GetTesseractUrl(),
+            stream,
+            progress,
+            cancellationToken);
     }
 
     public async Task DownloadTesseractModel(string modelUrl, Stream stream, IProgress<float>? progress, CancellationToken cancellationToken)
     {
         await DownloadHelper.DownloadFileAsync(_httpClient, modelUrl, stream, progress, cancellationToken);
+    }
+
+    internal static async Task DownloadAndVerifyRuntimeAsync(
+        HttpClient httpClient,
+        string url,
+        Stream stream,
+        IProgress<float>? progress,
+        CancellationToken cancellationToken)
+    {
+        await DownloadHelper.DownloadFileAsync(httpClient, url, stream, progress, cancellationToken);
+        await VerifyRuntimeArchiveAsync(stream, cancellationToken);
+    }
+
+    internal static async Task VerifyRuntimeArchiveAsync(Stream stream, CancellationToken cancellationToken)
+    {
+        if (!stream.CanRead || !stream.CanSeek)
+        {
+            throw new InvalidOperationException("Tesseract runtime integrity verification requires a readable, seekable stream.");
+        }
+
+        string actual;
+        stream.Position = 0;
+        try
+        {
+            actual = await Sha256Util.ComputeSha256Async(stream, cancellationToken);
+        }
+        finally
+        {
+            stream.Position = 0;
+        }
+
+        if (!string.Equals(WindowsArchiveSha256, actual, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new IOException(
+                $"Tesseract runtime download failed integrity check (expected SHA-256 {WindowsArchiveSha256}, got {actual}).");
+        }
     }
 
     /// <summary>
