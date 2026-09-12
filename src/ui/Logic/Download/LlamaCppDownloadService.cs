@@ -40,25 +40,37 @@ public class LlamaCppDownloadService(HttpClient httpClient) : ILlamaCppDownloadS
         await VerifyArchive(stream, DownloadHashManager.ResolveLlamaCppKey(variant), "engine", cancellationToken);
     }
 
-    // Compares the downloaded bytes against the known SHA-256 for this key and throws on mismatch
-    // so the caller's IsFaulted branch surfaces "Download failed" instead of silently unpacking a
-    // truncated or tampered file. Mirrors Qwen3TtsCppDownloadService.VerifyArchive.
-    private static async Task VerifyArchive(Stream stream, string? key, string label, CancellationToken cancellationToken)
+    // Compares the downloaded bytes against the current registered SHA-256 and fails closed
+    // if the key/digest cannot be resolved. The caller must never unpack bytes whose expected
+    // identity is unknown.
+    internal static async Task VerifyArchive(Stream stream, string? key, string label, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrEmpty(key) || stream.Length == 0)
+        if (string.IsNullOrEmpty(key))
         {
-            return;
+            throw new InvalidOperationException($"No SHA-256 key is registered for llama.cpp {label}.");
         }
 
         var expected = DownloadHashManager.GetLatestKnownHash(key);
         if (string.IsNullOrEmpty(expected))
         {
-            return;
+            throw new InvalidOperationException($"No SHA-256 is registered for llama.cpp {label} key '{key}'.");
         }
 
+        if (!stream.CanRead || !stream.CanSeek)
+        {
+            throw new InvalidOperationException($"llama.cpp {label} integrity verification requires a readable, seekable stream.");
+        }
+
+        string actual;
         stream.Position = 0;
-        var actual = await Sha256Util.ComputeSha256Async(stream, cancellationToken);
-        stream.Position = 0;
+        try
+        {
+            actual = await Sha256Util.ComputeSha256Async(stream, cancellationToken);
+        }
+        finally
+        {
+            stream.Position = 0;
+        }
 
         if (!string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase))
         {
