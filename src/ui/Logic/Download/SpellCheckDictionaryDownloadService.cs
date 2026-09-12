@@ -27,8 +27,8 @@ public class SpellCheckDictionaryDownloadService : ISpellCheckDictionaryDownload
     internal const string VoikkoDictionarySha256 =
         "98f26bb67e08288910fbf1aa92521f28bee79538ba86aefa267713333e7fa537";
 
-    private const string VoikkoReleasePath =
-        "/SubtitleEdit/support-files/releases/download/voikko-4.3-fi-2024-06/";
+    private const string VoikkoReleasePathPrefix =
+        "/SubtitleEdit/support-files/releases/download/voikko-";
 
     private static readonly IReadOnlyDictionary<string, string> VoikkoHashes =
         new Dictionary<string, string>(StringComparer.Ordinal)
@@ -61,7 +61,7 @@ public class SpellCheckDictionaryDownloadService : ISpellCheckDictionaryDownload
         }
 
         if (Uri.TryCreate(url, UriKind.Absolute, out var uri) &&
-            uri.AbsolutePath.StartsWith(VoikkoReleasePath, StringComparison.Ordinal))
+            uri.AbsolutePath.StartsWith(VoikkoReleasePathPrefix, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException($"No SHA-256 is registered for Voikko URL '{url}'.");
         }
