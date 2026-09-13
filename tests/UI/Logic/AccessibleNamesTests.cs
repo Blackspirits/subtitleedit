@@ -88,6 +88,12 @@ public class AccessibleNamesTests
                     if (!AccessibleLabels.HasAccessibleName(control))
                     {
                         unnamed.AppendLine($"{type.Name}: {control.GetType().Name} {Describe(control)}");
+                        continue;
+                    }
+
+                    if (!HasUsableAccessibleName(control))
+                    {
+                        unnamed.AppendLine($"{type.Name}: {control.GetType().Name} has an empty/unusable accessible label {Describe(control)}");
                     }
                 }
             }
@@ -120,6 +126,34 @@ public class AccessibleNamesTests
         {
             // Ignored - see summary.
         }
+    }
+
+    private static bool HasUsableAccessibleName(Control control)
+    {
+        if (!string.IsNullOrWhiteSpace(AutomationProperties.GetName(control)))
+        {
+            return true;
+        }
+
+        var labeledBy = AutomationProperties.GetLabeledBy(control);
+        if (labeledBy == null)
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(AutomationProperties.GetName(labeledBy)))
+        {
+            return true;
+        }
+
+        return labeledBy switch
+        {
+            TextBlock textBlock => !string.IsNullOrWhiteSpace(textBlock.Text),
+            Label label => !string.IsNullOrWhiteSpace(label.Content?.ToString()),
+            CheckBox checkBox => !string.IsNullOrWhiteSpace(checkBox.Content?.ToString()),
+            RadioButton radioButton => !string.IsNullOrWhiteSpace(radioButton.Content?.ToString()),
+            _ => false,
+        };
     }
 
     private static string Describe(Control control)
