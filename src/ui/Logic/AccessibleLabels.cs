@@ -211,18 +211,19 @@ public static class AccessibleLabels
     {
         if (control is Label label)
         {
-            return label.Content is not Control;
+            return label.Content is string labelText && !string.IsNullOrWhiteSpace(labelText);
         }
 
         if (control is CheckBox or RadioButton)
         {
-            return ((ContentControl)control).Content is string;
+            return ((ContentControl)control).Content is string contentText &&
+                   !string.IsNullOrWhiteSpace(contentText);
         }
 
         if (control is TextBlock textBlock)
         {
             var text = textBlock.Text;
-            return text == null || (text.Length <= 80 && !text.Contains('\n'));
+            return !string.IsNullOrWhiteSpace(text) && text.Length <= 80 && !text.Contains('\n');
         }
 
         return false;
