@@ -869,6 +869,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             var swsSourceFormat = AVPixelFormat.AV_PIX_FMT_NONE;
             var outputWidth = 0;
             var outputHeight = 0;
+            VideoFrame? lastDropped = null; // detached from the queue while seeking; must be returned on every exit
 
             try
             {
@@ -886,7 +887,6 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 var serial = -1;
                 var dropUntil = -1.0;
                 var presentedForSerial = false;
-                VideoFrame? lastDropped = null; // kept so a target past the last picture still shows something
 
                 while (!_closing)
                 {
@@ -919,6 +919,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                             // The hardware decoder rejected the stream - retry it in software.
                             codec = FallBackToSoftware(codec, stream, sendResult, ref hardware);
                             serial = -1;
+                            Seek(Position);
                         }
 
                         continue;
@@ -1058,6 +1059,8 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             }
             finally
             {
+                _videoFrames.Return(lastDropped);
+
                 if (sws != null)
                 {
                     ffmpeg.sws_freeContext(sws);
@@ -1287,6 +1290,14 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             result = ffmpeg.avcodec_open2(codec, decoder, null);
             if (result < 0)
             {
+                if (hardware && codec->hw_device_ctx != null)
+                {
+                    var deviceName = HardwareDeviceName(codec);
+                    Se.LogError($"ffmpeg player: {deviceName} decoder open failed for {ffmpeg.avcodec_get_name(stream->codecpar->codec_id)} ({FfmpegLibraries.ErrorText(result)}), falling back to software decoding");
+                    ffmpeg.avcodec_free_context(&codec);
+                    return OpenDecoder(stream, hardware: false);
+                }
+
                 ffmpeg.avcodec_free_context(&codec);
                 throw new InvalidOperationException($"avcodec_open2: {FfmpegLibraries.ErrorText(result)}");
             }
