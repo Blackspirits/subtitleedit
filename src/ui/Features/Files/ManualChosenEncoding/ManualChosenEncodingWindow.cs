@@ -171,7 +171,7 @@ public class ManualChosenEncodingWindow : Window
         textBox.Bind(TextBox.TextProperty, new Binding(nameof(vm.PreviewText)) { Source = vm, Mode = BindingMode.OneWay });
 
         grid.Add(label, 0);
-        grid.Add(textBox, 1);
+        grid.Add(textBox.WithLabeledBy(label), 1);
 
         return UiUtil.MakeBorderForControl(grid);
     }

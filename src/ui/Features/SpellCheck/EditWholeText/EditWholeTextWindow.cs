@@ -64,7 +64,7 @@ public class EditWholeTextWindow : Window
         };
 
         grid.Add(labelLineInfo, 0, 0);
-        grid.Add(textBoxWholeText, 1, 0);
+        grid.Add(textBoxWholeText.WithLabeledBy(labelLineInfo), 1, 0);
         grid.Add(panelButtons, 2, 0);
 
         Content = grid;

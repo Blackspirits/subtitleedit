@@ -42,6 +42,7 @@ public class PickAudioTrackWindow : Window
         };
         comboBox.Bind(ComboBox.ItemsSourceProperty, new Binding(nameof(PickAudioTrackViewModel.Tracks)));
         comboBox.Bind(ComboBox.SelectedItemProperty, new Binding(nameof(PickAudioTrackViewModel.SelectedTrack)));
+        comboBox.WithAccessibleName(Se.Language.Video.RemuxVideoSelectAudioTrack);
 
         var buttonOk = UiUtil.MakeButtonOk(vm.OkCommand);
         var buttonCancel = UiUtil.MakeButtonCancel(vm.CancelCommand);

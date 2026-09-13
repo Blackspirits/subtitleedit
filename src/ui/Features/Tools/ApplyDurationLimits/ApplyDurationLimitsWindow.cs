@@ -191,6 +191,7 @@ public class ApplyDurationLimitsWindow : Window
             item => item.Apply, (item, v) => item.Apply = v);
 
         grid.Add(labelFixesAvailable, 0);
+        dataGrid.WithLabeledBy(labelFixesAvailable);
         grid.Add(UiUtil.MakeBorderForControlNoPadding(dataGrid), 1);
 
         return grid;
@@ -281,6 +282,7 @@ public class ApplyDurationLimitsWindow : Window
         }, RoutingStrategies.Tunnel);
 
         grid.Add(labelFixesAvailable, 0);
+        dataGrid.WithLabeledBy(labelFixesAvailable);
         grid.Add(UiUtil.MakeBorderForControlNoPadding(dataGrid), 1);
 
         return grid;
