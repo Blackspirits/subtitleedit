@@ -99,7 +99,8 @@ public class AccessibleNamesTests
             }
         }
 
-        Assert.True(opened > 50, $"Only {opened} windows opened; skipped: {string.Join(", ", skipped)}");
+        Assert.True(skipped.Count == 0, $"Windows skipped structurally: {string.Join(", ", skipped)}");
+        Assert.True(opened > 50, $"Only {opened} windows opened");
         Assert.True(unnamed.Length == 0, $"Inputs without an accessible name ({opened} windows opened, {skipped.Count} skipped):\n{unnamed}");
     }
 
