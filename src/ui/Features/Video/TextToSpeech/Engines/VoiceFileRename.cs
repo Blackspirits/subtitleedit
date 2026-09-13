@@ -144,29 +144,29 @@ public static class VoiceFileRename
             return oldFileName;
         }
 
-        var sourceFiles = Directory.GetFiles(folder, oldBaseName + ".*")
-            .Where(file => string.Equals(
-                Path.GetFileNameWithoutExtension(file),
-                oldBaseName,
-                StringComparison.OrdinalIgnoreCase))
-            .ToList();
-
-        if (!sourceFiles.Any(file => string.Equals(file, oldFileName, StringComparison.OrdinalIgnoreCase)))
-        {
-            sourceFiles.Add(oldFileName);
-        }
-
-        var moves = sourceFiles
-            .Select(source => new RenameMove(
-                source,
-                Path.Combine(folder, newBaseName + Path.GetExtension(source)),
-                Path.Combine(folder, $".se-voice-rename-{Guid.NewGuid():N}.tmp")))
-            .ToList();
-
         var staged = new List<RenameMove>();
         var published = new List<RenameMove>();
         try
         {
+            var sourceFiles = Directory.GetFiles(folder, oldBaseName + ".*")
+                .Where(file => string.Equals(
+                    Path.GetFileNameWithoutExtension(file),
+                    oldBaseName,
+                    StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (!sourceFiles.Any(file => string.Equals(file, oldFileName, StringComparison.OrdinalIgnoreCase)))
+            {
+                sourceFiles.Add(oldFileName);
+            }
+
+            var moves = sourceFiles
+                .Select(source => new RenameMove(
+                    source,
+                    Path.Combine(folder, newBaseName + Path.GetExtension(source)),
+                    Path.Combine(folder, $".se-voice-rename-{Guid.NewGuid():N}.tmp")))
+                .ToList();
+
             // Stage every source first. Besides making rollback possible, this makes a case-only
             // rename portable: on a case-insensitive file system the destination stops existing
             // once the source has been staged, while on a case-sensitive file system a distinct
