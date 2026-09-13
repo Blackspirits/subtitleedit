@@ -700,7 +700,6 @@ internal class SubtitleConverter
     private async Task<bool> PassThroughXSubAsync(string inputFile, ConversionOptions options, ConversionResult result, int fileIndex, FileTimestamps? sourceTimestamps, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        cancellationToken.ThrowIfCancellationRequested();
         var allStreams = BitmapSubtitleLoader.LoadXSub(inputFile);
         cancellationToken.ThrowIfCancellationRequested();
         if (allStreams.Count == 0)
