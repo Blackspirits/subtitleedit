@@ -818,7 +818,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
 
                 var serial = -1;
                 var dropUntil = -1.0;
-                var presentedForSerial = false
+                var presentedForSerial = false;
 
                 while (!_closing)
                 {
