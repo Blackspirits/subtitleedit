@@ -24,6 +24,15 @@ internal static class McpServerHost
 
     public static async Task<int> RunAsync(string[] args)
     {
+        var unknown = args.FirstOrDefault(a =>
+            !a.Equals("--verbose", StringComparison.OrdinalIgnoreCase) &&
+            !a.Equals("-v", StringComparison.OrdinalIgnoreCase));
+        if (unknown != null)
+        {
+            Console.Error.WriteLine($"Unknown mcp option: {unknown}. Valid options: --verbose, -v.");
+            return 1;
+        }
+
         var verbose = args.Any(a =>
             a.Equals("--verbose", StringComparison.OrdinalIgnoreCase) ||
             a.Equals("-v", StringComparison.OrdinalIgnoreCase));

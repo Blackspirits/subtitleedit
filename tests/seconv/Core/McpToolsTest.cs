@@ -161,6 +161,35 @@ public class McpToolsTest : IDisposable
     }
 
     [Fact]
+    public async Task McpServer_UnknownOption_ExitsWithError()
+    {
+        var dll = Path.Combine(AppContext.BaseDirectory, "seconv.dll");
+        Assert.True(File.Exists(dll), $"seconv.dll not found next to the tests: {dll}");
+
+        using var process = new System.Diagnostics.Process
+        {
+            StartInfo = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "dotnet",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+            },
+        };
+        process.StartInfo.ArgumentList.Add(dll);
+        process.StartInfo.ArgumentList.Add("mcp");
+        process.StartInfo.ArgumentList.Add("--verbse");
+
+        Assert.True(process.Start());
+        var stderrTask = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+        var stderr = await stderrTask;
+
+        Assert.Equal(1, process.ExitCode);
+        Assert.Contains("Unknown mcp option: --verbse", stderr);
+    }
+
+    [Fact]
     public async Task StdioServer_ListsToolsAndAnswersCalls()
     {
         var dll = Path.Combine(AppContext.BaseDirectory, "seconv.dll");
