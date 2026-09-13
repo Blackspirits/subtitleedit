@@ -848,9 +848,13 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                     {
                         if (hardware)
                         {
-                            // The hardware decoder rejected the stream - retry it in software.
+                            // The hardware decoder rejected the stream. Reopen in software and
+                            // replay from a key frame; continuing from the next demuxed packet can
+                            // leave the fresh software decoder without the reference frames it
+                            // needs to decode the current GOP.
                             codec = FallBackToSoftware(codec, stream, sendResult, ref hardware);
                             serial = -1;
+                            Seek(Position);
                         }
 
                         continue;
