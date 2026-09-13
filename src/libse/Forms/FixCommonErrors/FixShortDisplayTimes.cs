@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Nikse.SubtitleEdit.Core.Enums;
+using System;
 using Nikse.SubtitleEdit.Core.Common;
 using Nikse.SubtitleEdit.Core.Interfaces;
 
@@ -6,6 +7,8 @@ namespace Nikse.SubtitleEdit.Core.Forms.FixCommonErrors
 {
     public class FixShortDisplayTimes : IFixCommonError
     {
+        public FixType FixType => FixType.Time;
+
         public static class Language
         {
             public static string FixShortDisplayTime { get; set; } = "Fix short display time";

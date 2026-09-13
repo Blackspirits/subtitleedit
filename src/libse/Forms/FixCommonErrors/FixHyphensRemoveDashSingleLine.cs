@@ -1,4 +1,5 @@
-﻿using System.Text.RegularExpressions;
+﻿using Nikse.SubtitleEdit.Core.Enums;
+using System.Text.RegularExpressions;
 using Nikse.SubtitleEdit.Core.Common;
 using Nikse.SubtitleEdit.Core.Interfaces;
 
@@ -6,6 +7,8 @@ namespace Nikse.SubtitleEdit.Core.Forms.FixCommonErrors
 {
     public class FixHyphensRemoveDashSingleLine : IFixCommonError
     {
+        public FixType FixType => FixType.Dialog;
+
         public static class Language
         {
             public static string RemoveHyphensSingleLine { get; set; } = "Remove dialog dashes in single lines";
