@@ -1,6 +1,7 @@
 ﻿using Nikse.SubtitleEdit.Features.Video.TextToSpeech.Voices;
 using Nikse.SubtitleEdit.Logic.Config;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 
@@ -16,6 +17,13 @@ namespace Nikse.SubtitleEdit.Features.Video.TextToSpeech.Engines;
 /// </summary>
 public static class VoiceFileRename
 {
+    private sealed class RenameMove(string source, string target, string temp)
+    {
+        public string Source { get; } = source;
+        public string Target { get; } = target;
+        public string Temp { get; } = temp;
+    }
+
     /// <summary>
     /// The reference recording <paramref name="voice"/> clones from, or null when the voice is
     /// not a renamable file-backed clone: an engine preset, the "Default" speaker, the per-line
@@ -136,46 +144,124 @@ public static class VoiceFileRename
             return oldFileName;
         }
 
-        var sameFileDifferentCase = string.Equals(oldBaseName, newBaseName, StringComparison.OrdinalIgnoreCase);
-        if (!sameFileDifferentCase && File.Exists(newFileName))
-        {
-            error = $"A voice named '{newName}' already exists";
-            return null;
-        }
-
+        var staged = new List<RenameMove>();
+        var published = new List<RenameMove>();
         try
         {
-            // Sidecars first (a rename that fails half-way is still a usable voice); WAV last.
-            foreach (var sidecar in Directory.GetFiles(folder, oldBaseName + ".*"))
+            var sourceFiles = Directory.GetFiles(folder, oldBaseName + ".*")
+                .Where(file => string.Equals(
+                    Path.GetFileNameWithoutExtension(file),
+                    oldBaseName,
+                    StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (!sourceFiles.Any(file => string.Equals(file, oldFileName, StringComparison.OrdinalIgnoreCase)))
             {
-                if (string.Equals(sidecar, oldFileName, StringComparison.OrdinalIgnoreCase) ||
-                    !string.Equals(Path.GetFileNameWithoutExtension(sidecar), oldBaseName, StringComparison.OrdinalIgnoreCase))
+                sourceFiles.Add(oldFileName);
+            }
+
+            var moves = sourceFiles
+                .Select(source => new RenameMove(
+                    source,
+                    Path.Combine(folder, newBaseName + Path.GetExtension(source)),
+                    Path.Combine(folder, $".se-voice-rename-{Guid.NewGuid():N}.tmp")))
+                .ToList();
+
+            // Stage every source first. Besides making rollback possible, this makes a case-only
+            // rename portable: on a case-insensitive file system the destination stops existing
+            // once the source has been staged, while on a case-sensitive file system a distinct
+            // destination with the other casing remains and is detected below.
+            foreach (var move in moves)
+            {
+                File.Move(move.Source, move.Temp);
+                staged.Add(move);
+            }
+
+            foreach (var move in moves)
+            {
+                if (File.Exists(move.Target))
                 {
-                    continue;
+                    throw new IOException($"A voice file named '{Path.GetFileName(move.Target)}' already exists");
                 }
-
-                var target = Path.Combine(folder, newBaseName + Path.GetExtension(sidecar));
-                File.Move(sidecar, target, overwrite: sameFileDifferentCase);
             }
 
-            File.Move(oldFileName, newFileName, overwrite: sameFileDifferentCase);
-
-            // The prepared copy is keyed on the reference's file name; the next synthesis makes
-            // a fresh one under the new name, so the old one would only be an orphan.
-            var prepared = CloneReferenceTail.GetPreparedFileName(oldFileName);
-            foreach (var stale in new[] { prepared, prepared + ".stamp" }.Where(File.Exists))
+            foreach (var move in moves)
             {
-                File.Delete(stale);
+                File.Move(move.Temp, move.Target);
+                published.Add(move);
             }
-
-            Se.WriteToolsLog($"TTS voice renamed: '{oldFileName}' -> '{newFileName}'");
-            return newFileName;
         }
         catch (Exception ex)
         {
+            RollbackRename(staged, published);
             Se.LogError(ex, $"Renaming TTS voice '{oldFileName}' to '{newFileName}' failed");
             error = ex.Message;
             return null;
+        }
+
+        // The prepared copy is keyed on the reference's file name; the next synthesis makes a
+        // fresh one under the new name. Cache cleanup is best-effort and must not roll back an
+        // otherwise successful rename.
+        var prepared = CloneReferenceTail.GetPreparedFileName(oldFileName);
+        foreach (var stale in new[] { prepared, prepared + ".stamp" }.Where(File.Exists))
+        {
+            try
+            {
+                File.Delete(stale);
+            }
+            catch (Exception ex)
+            {
+                Se.LogError(ex, $"Removing stale TTS voice cache '{stale}' failed");
+            }
+        }
+
+        Se.WriteToolsLog($"TTS voice renamed: '{oldFileName}' -> '{newFileName}'");
+        return newFileName;
+    }
+
+    private static void RollbackRename(List<RenameMove> staged, List<RenameMove> published)
+    {
+        // Published case-only paths can alias their original source on case-insensitive file
+        // systems. Move them through a unique temporary path so restoring the original casing is
+        // reliable without ever overwriting another voice.
+        for (var i = published.Count - 1; i >= 0; i--)
+        {
+            var move = published[i];
+            if (!File.Exists(move.Target))
+            {
+                continue;
+            }
+
+            var rollbackTemp = Path.Combine(
+                Path.GetDirectoryName(move.Source) ?? string.Empty,
+                $".se-voice-rename-rollback-{Guid.NewGuid():N}.tmp");
+            try
+            {
+                File.Move(move.Target, rollbackTemp);
+                File.Move(rollbackTemp, move.Source);
+            }
+            catch (Exception ex)
+            {
+                Se.LogError(ex, $"Rolling back TTS voice rename '{move.Target}' -> '{move.Source}' failed");
+            }
+        }
+
+        for (var i = staged.Count - 1; i >= 0; i--)
+        {
+            var move = staged[i];
+            if (!File.Exists(move.Temp))
+            {
+                continue;
+            }
+
+            try
+            {
+                File.Move(move.Temp, move.Source);
+            }
+            catch (Exception ex)
+            {
+                Se.LogError(ex, $"Restoring staged TTS voice file '{move.Source}' failed");
+            }
         }
     }
 }

@@ -73,6 +73,68 @@ public class VoiceFileRenameTests : IDisposable
     }
 
     [Fact]
+    public void Rename_SidecarCollision_RollsBackAllStagedFiles()
+    {
+        var voice = MakeVoice("A");
+        File.WriteAllText(Path.Combine(_folder, "A.txt"), "transcript");
+        File.WriteAllText(Path.Combine(_folder, "A.json"), "metadata");
+        File.WriteAllText(Path.Combine(_folder, "B.json"), "existing");
+
+        var result = VoiceFileRename.Rename(voice, "B", out var error);
+
+        Assert.Null(result);
+        Assert.NotEqual(string.Empty, error);
+        Assert.True(File.Exists(Path.Combine(_folder, "A.wav")));
+        Assert.Equal("transcript", File.ReadAllText(Path.Combine(_folder, "A.txt")));
+        Assert.Equal("metadata", File.ReadAllText(Path.Combine(_folder, "A.json")));
+        Assert.Equal("existing", File.ReadAllText(Path.Combine(_folder, "B.json")));
+        Assert.False(File.Exists(Path.Combine(_folder, "B.wav")));
+        Assert.False(File.Exists(Path.Combine(_folder, "B.txt")));
+        Assert.Empty(Directory.GetFiles(_folder, ".se-voice-rename-*.tmp"));
+    }
+
+    [Fact]
+    public void Rename_CaseOnlyRename_SucceedsWithoutOverwrite()
+    {
+        var voice = MakeVoice("CaseVoice");
+        File.WriteAllText(Path.Combine(_folder, "CaseVoice.txt"), "transcript");
+
+        var result = VoiceFileRename.Rename(voice, "caseVoice", out var error);
+
+        Assert.Equal(string.Empty, error);
+        Assert.Equal(Path.Combine(_folder, "caseVoice.wav"), result);
+        Assert.Contains(
+            Directory.GetFiles(_folder),
+            file => string.Equals(Path.GetFileName(file), "caseVoice.wav", StringComparison.Ordinal));
+        Assert.Contains(
+            Directory.GetFiles(_folder),
+            file => string.Equals(Path.GetFileName(file), "caseVoice.txt", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Rename_CaseOnlyCollision_OnCaseSensitiveFileSystem_PreservesBothVoices()
+    {
+        var upper = MakeVoice("CaseVoice");
+        MakeVoice("caseVoice");
+
+        if (Directory.GetFiles(_folder, "*.wav").Length < 2)
+        {
+            Assert.Skip("The current file system is case-insensitive.");
+        }
+
+        File.WriteAllBytes(Path.Combine(_folder, "CaseVoice.wav"), new byte[] { 1, 2, 3 });
+        File.WriteAllBytes(Path.Combine(_folder, "caseVoice.wav"), new byte[] { 4, 5, 6 });
+
+        var result = VoiceFileRename.Rename(upper, "caseVoice", out var error);
+
+        Assert.Null(result);
+        Assert.NotEqual(string.Empty, error);
+        Assert.Equal(new byte[] { 1, 2, 3 }, File.ReadAllBytes(Path.Combine(_folder, "CaseVoice.wav")));
+        Assert.Equal(new byte[] { 4, 5, 6 }, File.ReadAllBytes(Path.Combine(_folder, "caseVoice.wav")));
+        Assert.Empty(Directory.GetFiles(_folder, ".se-voice-rename-*.tmp"));
+    }
+
+    [Fact]
     public void Rename_RefusesEmptyAndInvalidNames()
     {
         var voice = MakeVoice("A");
