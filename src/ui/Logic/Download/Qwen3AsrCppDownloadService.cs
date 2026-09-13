@@ -4,6 +4,7 @@ using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
+using Nikse.SubtitleEdit.UiLogic;
 
 namespace Nikse.SubtitleEdit.Logic.Download;
 
@@ -59,6 +60,43 @@ public class Qwen3AsrCppDownloadService : IQwen3AsrCppDownloadService
     public async Task DownloadEngine(Stream stream, IProgress<float>? progress, CancellationToken cancellationToken, bool useVulkan = false)
     {
         await DownloadHelper.DownloadFileAsync(_httpClient, GetUrl(useVulkan), stream, progress, cancellationToken);
+        await VerifyArchiveAsync(stream, DownloadHashManager.ResolveQwen3AsrCppKey(useVulkan), cancellationToken);
+    }
+
+    internal static async Task VerifyArchiveAsync(Stream stream, string? key, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(key))
+        {
+            throw new InvalidOperationException("No SHA-256 key is registered for this Qwen3 ASR build.");
+        }
+
+        var expected = DownloadHashManager.GetLatestKnownHash(key);
+        if (string.IsNullOrEmpty(expected))
+        {
+            throw new InvalidOperationException($"No SHA-256 is registered for Qwen3 ASR key '{key}'.");
+        }
+
+        if (!stream.CanRead || !stream.CanSeek)
+        {
+            throw new InvalidOperationException("Qwen3 ASR integrity verification requires a readable, seekable stream.");
+        }
+
+        string actual;
+        stream.Position = 0;
+        try
+        {
+            actual = await Sha256Util.ComputeSha256Async(stream, cancellationToken);
+        }
+        finally
+        {
+            stream.Position = 0;
+        }
+
+        if (!string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new IOException(
+                $"Qwen3 ASR download failed integrity check (expected SHA-256 {expected}, got {actual}).");
+        }
     }
 
     private static string GetUrl(bool useVulkan)
