@@ -27,14 +27,11 @@ public class TesseractDownloadServiceTests
     }
 
     [Fact]
-    public async Task VerifyRuntimeArchiveAsync_ValidPayload_RewindsStream()
+    public async Task VerifyRuntimeArchiveAsync_MismatchFromEndPosition_RewindsStream()
     {
         await using var stream = new MemoryStream(Encoding.ASCII.GetBytes("abc"));
         stream.Position = stream.Length;
 
-        // Verify the rewind contract independently using the canonical SHA-256 vector by
-        // temporarily exercising the same helper shape is not possible because the runtime
-        // digest is fixed. A non-matching payload must still rewind before throwing.
         await Assert.ThrowsAsync<IOException>(() =>
             TesseractDownloadService.VerifyRuntimeArchiveAsync(
                 stream,
