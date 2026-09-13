@@ -18,7 +18,7 @@ public class VoicePack
     public long SizeBytes { get; }
     public string License { get; }
 
-    /// <summary>Lower-case SHA-256 of the zip; empty skips verification.</summary>
+    /// <summary>Required lower-case SHA-256 of the zip.</summary>
     public string Sha256 { get; }
 
     public VoicePack(string id, string name, string languageName, string languageCode, string description, string url, int voiceCount, long sizeBytes, string license, string sha256)
