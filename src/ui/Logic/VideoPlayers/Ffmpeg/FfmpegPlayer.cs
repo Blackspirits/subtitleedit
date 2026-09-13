@@ -391,13 +391,22 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         CloseFile();
     }
 
-    private void Present(VideoFrame frame, VideoFrameQueue pool)
+    private void Present(VideoFrame frame, VideoFrameQueue pool, LoadCancellation cancellation)
     {
         VideoFrame? previous;
-        lock (_currentFrameLock)
+        lock (_loadLock)
         {
-            previous = _currentFrame;
-            _currentFrame = frame;
+            if (_disposed || cancellation.IsCancelled || !ReferenceEquals(_loadCancellation, cancellation))
+            {
+                pool.Return(frame);
+                return;
+            }
+
+            lock (_currentFrameLock)
+            {
+                previous = _currentFrame;
+                _currentFrame = frame;
+            }
         }
 
         pool.Return(previous);
@@ -1779,7 +1788,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             // Timestamp after the serial so HasPlaybackRestartedSince never sees a new
             // timestamp with an old serial.
             Interlocked.Exchange(ref _lastRestartTimestamp, Stopwatch.GetTimestamp());
-            _owner.Present(frame, _videoFrames);
+            _owner.Present(frame, _videoFrames, _loadCancellation);
         }
 
         // ---------------------------------------------------------------- teardown
