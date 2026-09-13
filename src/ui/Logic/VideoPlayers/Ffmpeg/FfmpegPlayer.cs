@@ -142,11 +142,30 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             generation = ++_loadGeneration;
             previousSession = _session;
             _session = null;
-            _fileName = fileName;
+            _fileName = string.Empty;
         }
 
         previousSession?.Dispose();
-        ClearCurrentFrame();
+
+        var notifyFrameCleared = false;
+        lock (_loadLock)
+        {
+            // A newer open/close may have won while the old Session was shutting down. In that
+            // case this request must not clear the newer request's frame or file name.
+            if (_disposed || generation != _loadGeneration)
+            {
+                return Task.CompletedTask;
+            }
+
+            ClearCurrentFrameState();
+            notifyFrameCleared = true;
+            _fileName = fileName;
+        }
+
+        if (notifyFrameCleared)
+        {
+            FrameReady?.Invoke();
+        }
 
         return Task.Run(() =>
         {
@@ -177,6 +196,8 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                     return;
                 }
 
+                // Start/Seek are cheap state/thread setup. Keep publication atomic with close or a
+                // replacement load so a Session cannot be disposed between validation and start.
                 session.Volume = _volume;
                 session.Speed = _speed;
                 session.Start();
@@ -192,29 +213,45 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
     public void CloseFile()
     {
         Session? session;
+        int generation;
         lock (_loadLock)
         {
-            _loadGeneration++;
+            generation = ++_loadGeneration;
             session = _session;
             _session = null;
             _fileName = string.Empty;
         }
 
         session?.Dispose();
-        ClearCurrentFrame();
+
+        var notifyFrameCleared = false;
+        lock (_loadLock)
+        {
+            // Do not erase a frame that belongs to a newer LoadFile which started while the old
+            // Session was shutting down.
+            if (generation == _loadGeneration)
+            {
+                ClearCurrentFrameState();
+                notifyFrameCleared = true;
+            }
+        }
+
+        if (notifyFrameCleared)
+        {
+            FrameReady?.Invoke();
+        }
     }
 
-    private void ClearCurrentFrame()
+    private void ClearCurrentFrameState()
     {
         lock (_currentFrameLock)
         {
-            // The frame belonged to the session's pool, which is gone now.
+            // The frame belonged to the Session that was just detached.
             _currentFrame?.Dispose();
             _currentFrame = null;
         }
 
         Interlocked.Increment(ref _frameVersion);
-        FrameReady?.Invoke();
     }
 
     public void Play()
