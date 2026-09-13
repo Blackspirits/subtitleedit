@@ -27,7 +27,13 @@ public class AccessibleNamesTests
 {
     private static readonly string[] SkippedWindows =
     [
-        // Needs a video/file and starts work in the constructor.
+        // Runtime-only fullscreen host: requires an existing VideoPlayerControl plus media state
+        // and callbacks; it is not a DI/view-model tool window that this reflection sweep can build.
+        "FullScreenVideoWindow",
+
+        // Factory-created modal with a private multi-argument constructor. It is exercised through
+        // MessageBox.Show rather than constructed from a DI-resolvable view model.
+        "MessageBox",
     ];
 
     [AvaloniaFact]
@@ -99,7 +105,8 @@ public class AccessibleNamesTests
             }
         }
 
-        Assert.True(opened > 50, $"Only {opened} windows opened; skipped: {string.Join(", ", skipped)}");
+        Assert.True(skipped.Count == 0, $"Windows skipped structurally: {string.Join(", ", skipped)}");
+        Assert.True(opened > 50, $"Only {opened} windows opened");
         Assert.True(unnamed.Length == 0, $"Inputs without an accessible name ({opened} windows opened, {skipped.Count} skipped):\n{unnamed}");
     }
 
