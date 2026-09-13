@@ -169,7 +169,7 @@ internal sealed class SubtitleTools
         [Description("FixCommonErrors rule selection: comma-separated ids from list_fix_common_errors_rules, 'all', or 'all,-RuleId'. Implies the FixCommonErrors operation.")] string? fixCommonErrorsRules = null,
         [Description("Force the language used by FixCommonErrors' language-gated rules (two-letter code such as 'en' or 'es'). Default: auto-detect from the text.")] string? fixCommonErrorsLanguage = null,
         [Description("RemoveFormatting rule selection: comma-separated ids from list_remove_formatting_rules, or 'all,-RuleId'. Implies the RemoveFormatting operation.")] string? removeFormattingRules = null,
-        [Description("Container inputs: subtitle track numbers to extract. Default: every text track.")] int[]? trackNumbers = null,
+        [Description("Container inputs: subtitle track numbers to extract. Default: every supported subtitle track (text plus supported image tracks such as PGS/VobSub, which may require OCR unless timeCodesOnly is true).")] int[]? trackNumbers = null,
         [Description("Image-based inputs: keep only the time codes and skip OCR (text is left empty).")] bool timeCodesOnly = false,
         [Description("OCR engine for image-based inputs: tesseract (default), nocr, binaryocr, ollama, paddle or llamacpp.")] string? ocrEngine = null,
         [Description("OCR language for image-based inputs (Tesseract ISO 639-2 code such as 'eng').")] string? ocrLanguage = null,
