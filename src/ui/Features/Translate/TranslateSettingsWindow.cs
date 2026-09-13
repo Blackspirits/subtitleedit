@@ -81,6 +81,7 @@ public class TranslateSettingsWindow : Window
             TextWrapping = Avalonia.Media.TextWrapping.Wrap,
         }.BindIsVisible(vm, nameof(vm.PromptIsVisible))
             .BindText(vm, nameof(vm.PromptText));
+        promptTextBox.WithLabeledBy(labelPrompt);
 
         var buttonOk = UiUtil.MakeButtonOk(vm.OkCommand);
         var buttonCancel = UiUtil.MakeButtonCancel(vm.CancelCommand);

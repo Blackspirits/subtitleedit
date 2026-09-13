@@ -504,6 +504,7 @@ public class VoiceManagerWindow : Window
             HorizontalAlignment = HorizontalAlignment.Stretch,
             [!TextBox.TextProperty] = new Binding(nameof(vm.Transcript)) { Mode = BindingMode.TwoWay },
         };
+        transcriptBox.WithLabeledBy(transcriptHeader);
 
         var transcriptPanel = new StackPanel
         {
