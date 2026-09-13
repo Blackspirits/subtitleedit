@@ -935,7 +935,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             var swsSourceFormat = AVPixelFormat.AV_PIX_FMT_NONE;
             var outputWidth = 0;
             var outputHeight = 0;
-            VideoFrame? lastDropped = null;
+            VideoFrame? lastDropped = null; // detached from the queue while seeking; must be returned on every exit
 
             try
             {
@@ -1168,6 +1168,9 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             var target = Position;
             Seek(target);
 
+            // Do not let already-demuxed packets from the failed hardware serial feed the fresh
+            // software decoder before the demux thread performs the seek. A user seek that races
+            // with this one has a higher serial and is also safe to accept.
             _videoFrames.Flush();
             _presentWake.Set();
             lock (_seekLock)
