@@ -188,7 +188,11 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             }
             catch (Exception exception)
             {
-                Se.LogError(exception, $"ffmpeg player failed to open: {fileName}");
+                if (!cancellation.IsCancelled)
+                {
+                    Se.LogError(exception, $"ffmpeg player failed to open: {fileName}");
+                }
+
                 lock (_loadLock)
                 {
                     if (generation == _loadGeneration)
@@ -1781,7 +1785,6 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
 
         public void Dispose()
         {
-            _loadCancellation.IsCancelled = true;
             _closing = true;
             _playing = false;
             _videoPackets.Close();
