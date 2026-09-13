@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Net;
 using System.Text;
 using Nikse.SubtitleEdit.Features.Video.TextToSpeech.VoiceManager.VoicePacks;
@@ -18,7 +19,7 @@ public class VoicePackDownloadServiceTests
     [InlineData("pt", "7ef61545300c4cfbd0c837acb80625835f3f4e673461ac4eae3b444eb33a8685")]
     public void CatalogHash_MatchesPublishedReleaseDigest(string id, string expected)
     {
-        var pack = Assert.Single(VoicePackCatalog.All, p => p.Id == id);
+        var pack = VoicePackCatalog.All.Single(p => p.Id == id);
         Assert.Equal(expected, pack.Sha256);
     }
 
