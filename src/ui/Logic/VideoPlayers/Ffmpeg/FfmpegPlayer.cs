@@ -45,8 +45,14 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
 
     private string _fileName = string.Empty;
     private bool _disposed;
+    private sealed class LoadCancellation
+    {
+        public volatile bool IsCancelled;
+    }
+
     private readonly Lock _loadLock = new();
     private int _loadGeneration;
+    private LoadCancellation? _loadCancellation;
     private Session? _session;
     private double _volume = 100;
     private double _speed = 1.0;
@@ -133,13 +139,18 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
     public Task LoadFile(string fileName, double startPositionSeconds = 0)
     {
         Session? previousSession;
+        LoadCancellation cancellation;
         int generation;
         lock (_loadLock)
         {
             // Reserve this open before doing any slow native work. CloseFile or a newer LoadFile
             // increments the generation, so this Task can never publish an obsolete session after
-            // the caller has already closed/replaced it.
+            // the caller has already closed/replaced it. Cancelling the previous operation also
+            // interrupts FFmpeg I/O if its open/demux thread is blocked.
             generation = ++_loadGeneration;
+            _loadCancellation?.IsCancelled = true;
+            cancellation = new LoadCancellation();
+            _loadCancellation = cancellation;
             previousSession = _session;
             _session = null;
             _fileName = string.Empty;
@@ -154,6 +165,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             // case this request must not clear the newer request's frame or file name.
             if (_disposed || generation != _loadGeneration)
             {
+                cancellation.IsCancelled = true;
                 return Task.CompletedTask;
             }
 
@@ -172,16 +184,21 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             Session session;
             try
             {
-                session = new Session(this, fileName);
+                session = new Session(this, fileName, cancellation);
             }
             catch (Exception exception)
             {
-                Se.LogError(exception, $"ffmpeg player failed to open: {fileName}");
+                if (!cancellation.IsCancelled)
+                {
+                    Se.LogError(exception, $"ffmpeg player failed to open: {fileName}");
+                }
+
                 lock (_loadLock)
                 {
                     if (generation == _loadGeneration)
                     {
                         _fileName = string.Empty;
+                        _loadCancellation = null;
                     }
                 }
 
@@ -217,6 +234,8 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         lock (_loadLock)
         {
             generation = ++_loadGeneration;
+            _loadCancellation?.IsCancelled = true;
+            _loadCancellation = null;
             session = _session;
             _session = null;
             _fileName = string.Empty;
@@ -426,6 +445,9 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         private int _audioStreamIndex = -1;
         private readonly List<int> _audioStreamIndexes = new();
         private readonly double _startTimeSeconds;
+        private readonly LoadCancellation _loadCancellation;
+        private GCHandle _interruptHandle;
+        private static readonly AVIOInterruptCB_callback InterruptIoDelegate = InterruptIo;
 
         private readonly PacketQueue _videoPackets = new();
         private readonly PacketQueue _audioPackets = new();
@@ -474,19 +496,33 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         public int VideoHeight { get; }
         public double DisplayAspectRatio { get; }
 
-        public Session(FfmpegPlayer owner, string fileName)
+        public Session(FfmpegPlayer owner, string fileName, LoadCancellation loadCancellation)
         {
             _owner = owner;
             _fileName = fileName;
+            _loadCancellation = loadCancellation;
 
-            AVFormatContext* format = null;
-            var result = ffmpeg.avformat_open_input(&format, NativeMediaPath.ForMpv(fileName), null, null);
-            if (result < 0)
+            _interruptHandle = GCHandle.Alloc(loadCancellation);
+            var format = ffmpeg.avformat_alloc_context();
+            if (format == null)
             {
-                throw new InvalidOperationException($"avformat_open_input: {FfmpegLibraries.ErrorText(result)}");
+                _interruptHandle.Free();
+                throw new InvalidOperationException("avformat_alloc_context failed");
             }
 
+            format->interrupt_callback = new AVIOInterruptCB
+            {
+                callback = InterruptIoDelegate,
+                opaque = (void*)GCHandle.ToIntPtr(_interruptHandle),
+            };
+
+            var result = ffmpeg.avformat_open_input(&format, NativeMediaPath.ForMpv(fileName), null, null);
             _format = format;
+            if (result < 0)
+            {
+                Dispose();
+                throw new InvalidOperationException($"avformat_open_input: {FfmpegLibraries.ErrorText(result)}");
+            }
             result = ffmpeg.avformat_find_stream_info(format, null);
             if (result < 0)
             {
@@ -562,6 +598,26 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 }
 
                 _audioSink.Pause();
+            }
+        }
+
+        private static int InterruptIo(void* opaque)
+        {
+            if (opaque == null)
+            {
+                return 0;
+            }
+
+            try
+            {
+                var handle = GCHandle.FromIntPtr((IntPtr)opaque);
+                return handle.Target is LoadCancellation state && state.IsCancelled ? 1 : 0;
+            }
+            catch
+            {
+                // If callback state is ever unavailable, abort native I/O rather than allowing a
+                // close/replacement to remain blocked inside FFmpeg.
+                return 1;
             }
         }
 
@@ -1759,6 +1815,11 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 var format = _format;
                 ffmpeg.avformat_close_input(&format);
                 _format = null;
+            }
+
+            if (_interruptHandle.IsAllocated)
+            {
+                _interruptHandle.Free();
             }
         }
 
