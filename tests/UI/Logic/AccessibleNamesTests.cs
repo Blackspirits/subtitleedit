@@ -107,7 +107,7 @@ public class AccessibleNamesTests
     /// Runs pending dispatcher jobs. Unexpected dispatcher failures must fail the test;
     /// the Video OCR closed-owner race that previously required suppression is now fixed
     /// at the source by checking whether its window is already closing before showing the
-    /// message box.
+    /// message box (upstream 6840e797).
     /// </summary>
     private static void DrainJobs()
     {
