@@ -104,22 +104,14 @@ public class AccessibleNamesTests
     }
 
     /// <summary>
-    /// Runs pending dispatcher jobs, ignoring what they throw. Some view models probe media
-    /// on a background thread from Loaded and post a message box back (Video OCR: "unable
-    /// to read video"); when that post lands after the window is closed, showing the box
-    /// throws "Cannot show a window with a closed owner" - a timing artifact of opening
-    /// windows without files, not an accessibility finding.
+    /// Runs pending dispatcher jobs. Unexpected dispatcher failures must fail the test;
+    /// the Video OCR closed-owner race that previously required suppression is now fixed
+    /// at the source by checking whether its window is already closing before showing the
+    /// message box.
     /// </summary>
     private static void DrainJobs()
     {
-        try
-        {
-            Dispatcher.UIThread.RunJobs();
-        }
-        catch (Exception)
-        {
-            // Ignored - see summary.
-        }
+        Dispatcher.UIThread.RunJobs();
     }
 
     private static string Describe(Control control)
