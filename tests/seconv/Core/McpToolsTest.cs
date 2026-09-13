@@ -130,6 +130,22 @@ public class McpToolsTest : IDisposable
     }
 
     [Fact]
+    public async Task ConvertSubtitle_NOcr_PassesDatabasePathToCore()
+    {
+        var missingDb = Path.Combine(_tempDir, "missing-db");
+        var result = Payload(await SubtitleTools.ConvertSubtitle(
+            inputs: [Fixtures.Path("sample.sup")],
+            format: "srt",
+            outputFolder: _tempDir,
+            ocrEngine: "nocr",
+            ocrDb: missingDb));
+
+        Assert.False(result.GetProperty("success").GetBoolean());
+        Assert.Contains(result.GetProperty("errors").EnumerateArray(),
+            e => e.GetString()?.Contains("missing-db.nocr", StringComparison.OrdinalIgnoreCase) == true);
+    }
+
+    [Fact]
     public async Task ConvertSubtitle_UnknownOperation_IsToolError()
     {
         var message = ErrorText(await SubtitleTools.ConvertSubtitle(
