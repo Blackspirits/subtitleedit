@@ -21,7 +21,9 @@ namespace UITests.Logic;
 /// by the window or derived from its visible label by <see cref="AccessibleLabels"/>
 /// (#12087: "I hear a value followed by combo box, but no label telling me which setting
 /// I am changing"). This opens every tool window that takes a single DI-resolvable view
-/// model and lists the inputs that still have no name.
+/// model and lists the inputs that still have no name. Hidden inputs are included because
+/// AccessibleLabels.Apply runs once when the window loads; controls that become visible later
+/// do not get a second inference pass.
 /// </summary>
 public class AccessibleNamesTests
 {
