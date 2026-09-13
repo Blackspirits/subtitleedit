@@ -935,6 +935,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             var swsSourceFormat = AVPixelFormat.AV_PIX_FMT_NONE;
             var outputWidth = 0;
             var outputHeight = 0;
+            VideoFrame? lastDropped = null;
 
             try
             {
@@ -950,9 +951,9 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                     : 1.0 / 25.0;
 
                 var serial = -1;
+                var minimumReplaySerial = -1;
                 var dropUntil = -1.0;
                 var presentedForSerial = false;
-                VideoFrame? lastDropped = null; // kept so a target past the last picture still shows something
 
                 while (!_closing)
                 {
@@ -960,6 +961,19 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                     {
                         continue;
                     }
+
+                    if (minimumReplaySerial >= 0 && entry.Serial < minimumReplaySerial)
+                    {
+                        var stalePacket = entry.Packet;
+                        if (stalePacket != null)
+                        {
+                            ffmpeg.av_packet_free(&stalePacket);
+                        }
+
+                        continue;
+                    }
+
+                    minimumReplaySerial = -1;
 
                     if (entry.Serial != serial)
                     {
@@ -985,6 +999,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                             // The hardware decoder rejected the stream - retry it in software.
                             codec = FallBackToSoftware(codec, stream, sendResult, ref hardware);
                             serial = -1;
+                            minimumReplaySerial = RequestHardwareFallbackReplay();
                         }
 
                         continue;
@@ -1092,7 +1107,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                         // the key frame.
                         codec = FallBackToSoftware(codec, stream, 0, ref hardware);
                         serial = -1;
-                        Seek(Position);
+                        minimumReplaySerial = RequestHardwareFallbackReplay();
                         continue;
                     }
 
@@ -1124,6 +1139,8 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             }
             finally
             {
+                _videoFrames.Return(lastDropped);
+
                 if (sws != null)
                 {
                     ffmpeg.sws_freeContext(sws);
@@ -1143,6 +1160,19 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 {
                     ffmpeg.avcodec_free_context(&codec);
                 }
+            }
+        }
+
+        private int RequestHardwareFallbackReplay()
+        {
+            var target = Position;
+            Seek(target);
+
+            _videoFrames.Flush();
+            _presentWake.Set();
+            lock (_seekLock)
+            {
+                return _requestedSerial;
             }
         }
 
@@ -1296,7 +1326,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         /// is attached; the caller can tell by <c>hw_device_ctx</c> being set. Any hardware setup
         /// failure silently means software.
         /// </summary>
-        private AVCodecContext* OpenDecoder(AVStream* stream, bool hardware = false)
+        private AVCodecContext* OpenDecoder(AVStream* stream, bool hardware = false, int hardwareStartIndex = 0)
         {
             var decoder = ffmpeg.avcodec_find_decoder(stream->codecpar->codec_id);
             if (decoder == null)
@@ -1320,10 +1350,12 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             codec->pkt_timebase = stream->time_base;
             codec->thread_count = 0; // auto
 
+            var selectedHardwareIndex = -1;
             if (hardware && stream->codecpar->codec_type == AVMediaType.AVMEDIA_TYPE_VIDEO)
             {
-                foreach (var deviceType in HardwareDeviceTypes)
+                for (var i = hardwareStartIndex; i < HardwareDeviceTypes.Length; i++)
                 {
+                    var deviceType = HardwareDeviceTypes[i];
                     if (!SupportsHardwareDevice(decoder, deviceType))
                     {
                         continue;
@@ -1346,6 +1378,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
 
                     codec->hw_device_ctx = device; // freed with the codec context
                     codec->get_format = GetHardwareFormatDelegate;
+                    selectedHardwareIndex = i;
                     break;
                 }
             }
@@ -1353,6 +1386,14 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             result = ffmpeg.avcodec_open2(codec, decoder, null);
             if (result < 0)
             {
+                if (hardware && selectedHardwareIndex >= 0)
+                {
+                    var deviceName = HardwareDeviceName(codec);
+                    Se.LogError($"ffmpeg player: {deviceName} decoder open failed for {ffmpeg.avcodec_get_name(stream->codecpar->codec_id)} ({FfmpegLibraries.ErrorText(result)}), trying the next hardware decoder or software");
+                    ffmpeg.avcodec_free_context(&codec);
+                    return OpenDecoder(stream, hardware: true, hardwareStartIndex: selectedHardwareIndex + 1);
+                }
+
                 ffmpeg.avcodec_free_context(&codec);
                 throw new InvalidOperationException($"avcodec_open2: {FfmpegLibraries.ErrorText(result)}");
             }
