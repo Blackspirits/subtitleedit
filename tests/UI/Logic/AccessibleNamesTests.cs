@@ -27,7 +27,13 @@ public class AccessibleNamesTests
 {
     private static readonly string[] SkippedWindows =
     [
-        // Needs a video/file and starts work in the constructor.
+        // Runtime-only fullscreen host: requires an existing VideoPlayerControl plus media state
+        // and callbacks; it is not a DI/view-model tool window that this reflection sweep can build.
+        "FullScreenVideoWindow",
+
+        // Factory-created modal with a private multi-argument constructor. It is exercised through
+        // MessageBox.Show rather than constructed from a DI-resolvable view model.
+        "MessageBox",
     ];
 
     [AvaloniaFact]
