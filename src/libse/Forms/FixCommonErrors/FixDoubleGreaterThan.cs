@@ -12,7 +12,7 @@ namespace Nikse.SubtitleEdit.Core.Forms.FixCommonErrors
             public static string FixDoubleGreaterThan { get; set; } = "Remove '>>'";
         }
 
-        public FixType FixType => FixType.Punctuation;
+        public FixType FixType => FixType.Dialog;
 
         public void Fix(Subtitle subtitle, IFixCallbacks callbacks)
         {
