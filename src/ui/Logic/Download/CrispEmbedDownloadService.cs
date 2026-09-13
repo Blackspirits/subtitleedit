@@ -4,6 +4,7 @@ using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
+using Nikse.SubtitleEdit.UiLogic;
 
 namespace Nikse.SubtitleEdit.Logic.Download;
 
@@ -41,27 +42,28 @@ public class CrispEmbedDownloadService : ICrispEmbedDownloadService
 
     public async Task DownloadEngine(Stream stream, IProgress<float>? progress, CancellationToken cancellationToken)
     {
-        await DownloadHelper.DownloadFileAsync(_httpClient, GetUrl(), stream, progress, cancellationToken);
+        var download = GetDefaultDownload();
+        await DownloadAndVerifyAsync(download.Url, download.HashKey, stream, progress, cancellationToken);
     }
 
     public async Task DownloadEngineWindowsCuda(Stream stream, IProgress<float>? progress, CancellationToken cancellationToken)
     {
-        await DownloadHelper.DownloadFileAsync(_httpClient, WindowsCudaUrl, stream, progress, cancellationToken);
+        await DownloadAndVerifyAsync(WindowsCudaUrl, DownloadHashManager.CrispEmbed.WindowsCuda, stream, progress, cancellationToken);
     }
 
     public async Task DownloadEngineWindowsVulkan(Stream stream, IProgress<float>? progress, CancellationToken cancellationToken)
     {
-        await DownloadHelper.DownloadFileAsync(_httpClient, WindowsVulkanUrl, stream, progress, cancellationToken);
+        await DownloadAndVerifyAsync(WindowsVulkanUrl, DownloadHashManager.CrispEmbed.WindowsVulkan, stream, progress, cancellationToken);
     }
 
     public async Task DownloadEngineWindowsCpu(Stream stream, IProgress<float>? progress, CancellationToken cancellationToken)
     {
-        await DownloadHelper.DownloadFileAsync(_httpClient, WindowsCpuUrl, stream, progress, cancellationToken);
+        await DownloadAndVerifyAsync(WindowsCpuUrl, DownloadHashManager.CrispEmbed.WindowsCpu, stream, progress, cancellationToken);
     }
 
     public async Task DownloadEngineLinuxCuda(Stream stream, IProgress<float>? progress, CancellationToken cancellationToken)
     {
-        await DownloadHelper.DownloadFileAsync(_httpClient, LinuxCudaUrl, stream, progress, cancellationToken);
+        await DownloadAndVerifyAsync(LinuxCudaUrl, DownloadHashManager.CrispEmbed.LinuxCuda, stream, progress, cancellationToken);
     }
 
     public async Task DownloadModel(string url, string destinationFileName, IProgress<float>? progress, CancellationToken cancellationToken)
@@ -69,21 +71,70 @@ public class CrispEmbedDownloadService : ICrispEmbedDownloadService
         await DownloadHelper.DownloadFileAsync(_httpClient, url, destinationFileName, progress, cancellationToken);
     }
 
-    private static string GetUrl()
+    private async Task DownloadAndVerifyAsync(
+        string url,
+        string hashKey,
+        Stream stream,
+        IProgress<float>? progress,
+        CancellationToken cancellationToken)
+    {
+        await DownloadHelper.DownloadFileAsync(_httpClient, url, stream, progress, cancellationToken);
+        await VerifyArchiveAsync(stream, hashKey, cancellationToken);
+    }
+
+    internal static async Task VerifyArchiveAsync(Stream stream, string? hashKey, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(hashKey))
+        {
+            throw new InvalidOperationException("No SHA-256 key is registered for the CrispEmbed runtime.");
+        }
+
+        var expected = DownloadHashManager.GetLatestKnownHash(hashKey);
+        if (string.IsNullOrEmpty(expected))
+        {
+            throw new InvalidOperationException($"No SHA-256 is registered for CrispEmbed runtime key '{hashKey}'.");
+        }
+
+        if (!stream.CanRead || !stream.CanSeek)
+        {
+            throw new InvalidOperationException("CrispEmbed runtime integrity verification requires a readable, seekable stream.");
+        }
+
+        string actual;
+        stream.Position = 0;
+        try
+        {
+            actual = await Sha256Util.ComputeSha256Async(stream, cancellationToken);
+        }
+        finally
+        {
+            stream.Position = 0;
+        }
+
+        if (!string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new IOException(
+                $"CrispEmbed runtime download failed integrity check (expected SHA-256 {expected}, got {actual}).");
+        }
+    }
+
+    private static (string Url, string HashKey) GetDefaultDownload()
     {
         if (OperatingSystem.IsWindows())
         {
-            return WindowsVulkanUrl;
+            return (WindowsVulkanUrl, DownloadHashManager.CrispEmbed.WindowsVulkan);
         }
 
         if (OperatingSystem.IsLinux())
         {
-            return RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? LinuxArmUrl : LinuxUrl;
+            return RuntimeInformation.ProcessArchitecture == Architecture.Arm64
+                ? (LinuxArmUrl, DownloadHashManager.CrispEmbed.LinuxArm)
+                : (LinuxUrl, DownloadHashManager.CrispEmbed.Linux);
         }
 
         if (OperatingSystem.IsMacOS())
         {
-            return MacUrl;
+            return (MacUrl, DownloadHashManager.CrispEmbed.MacOs);
         }
 
         throw new PlatformNotSupportedException();
