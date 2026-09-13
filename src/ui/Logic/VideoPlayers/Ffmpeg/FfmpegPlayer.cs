@@ -1219,6 +1219,14 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             result = ffmpeg.avcodec_open2(codec, decoder, null);
             if (result < 0)
             {
+                if (hardware && codec->hw_device_ctx != null)
+                {
+                    var deviceName = HardwareDeviceName(codec);
+                    Se.LogError($"ffmpeg player: {deviceName} decoder open failed for {ffmpeg.avcodec_get_name(stream->codecpar->codec_id)} ({FfmpegLibraries.ErrorText(result)}), falling back to software decoding");
+                    ffmpeg.avcodec_free_context(&codec);
+                    return OpenDecoder(stream, hardware: false);
+                }
+
                 ffmpeg.avcodec_free_context(&codec);
                 throw new InvalidOperationException($"avcodec_open2: {FfmpegLibraries.ErrorText(result)}");
             }
