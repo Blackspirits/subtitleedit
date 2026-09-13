@@ -461,6 +461,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         private Thread? _audioThread;
         private Thread? _presentThread;
         private volatile bool _closing;
+        private int _disposeStarted;
 
         private readonly AutoResetEvent _demuxWake = new(false);
         private readonly AutoResetEvent _presentWake = new(false);
@@ -1785,6 +1786,11 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
 
         public void Dispose()
         {
+            if (Interlocked.Exchange(ref _disposeStarted, 1) != 0)
+            {
+                return;
+            }
+
             _closing = true;
             _playing = false;
             _videoPackets.Close();
@@ -1801,11 +1807,33 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 // sink may not have been opened
             }
 
-            JoinThread(_demuxThread);
-            JoinThread(_videoThread);
-            JoinThread(_audioThread);
-            JoinThread(_presentThread);
+            // Never release native state while a worker may still be using it. FFmpeg's interrupt
+            // callback normally wakes blocking I/O quickly, but a protocol/driver can still ignore
+            // it. Keep the UI-facing timeout, then defer final cleanup until every worker exits.
+            var allStopped =
+                TryJoinThread(_demuxThread) &
+                TryJoinThread(_videoThread) &
+                TryJoinThread(_audioThread) &
+                TryJoinThread(_presentThread);
 
+            if (allStopped)
+            {
+                ReleaseResources();
+                return;
+            }
+
+            _ = Task.Run(() =>
+            {
+                JoinThreadToEnd(_demuxThread);
+                JoinThreadToEnd(_videoThread);
+                JoinThreadToEnd(_audioThread);
+                JoinThreadToEnd(_presentThread);
+                ReleaseResources();
+            });
+        }
+
+        private void ReleaseResources()
+        {
             _audioSink?.Dispose();
             _demuxWake.Dispose();
             _presentWake.Dispose();
@@ -1823,16 +1851,32 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             }
         }
 
-        private static void JoinThread(Thread? thread)
+        private static bool TryJoinThread(Thread? thread)
         {
-            if (thread == null || thread == Thread.CurrentThread)
+            if (thread == null)
             {
-                return;
+                return true;
             }
 
-            if (!thread.Join(TimeSpan.FromSeconds(5)))
+            if (thread == Thread.CurrentThread)
             {
-                Se.LogError($"ffmpeg player: thread '{thread.Name}' did not stop in time");
+                return false;
+            }
+
+            if (thread.Join(TimeSpan.FromSeconds(5)))
+            {
+                return true;
+            }
+
+            Se.LogError($"ffmpeg player: thread '{thread.Name}' did not stop in time; deferring resource cleanup");
+            return false;
+        }
+
+        private static void JoinThreadToEnd(Thread? thread)
+        {
+            if (thread != null && thread != Thread.CurrentThread)
+            {
+                thread.Join();
             }
         }
     }
