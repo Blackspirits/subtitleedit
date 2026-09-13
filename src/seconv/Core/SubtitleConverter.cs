@@ -314,7 +314,6 @@ internal class SubtitleConverter
             // work: add --vob-pal/--vob-ntsc and/or read VIDEO_TS.IFO.
             cancellationToken.ThrowIfCancellationRequested();
             var outputs = VobSubExtractor.Extract(vobFiles, outputBase, isPal: true);
-            cancellationToken.ThrowIfCancellationRequested();
             result.SuccessfulFiles = vobFiles.Count;
             // Report the first stream's output path against each input VOB. With multiple
             // streams there's no clean 1:1 mapping back to inputs, but the OutputFile slot
@@ -474,7 +473,6 @@ internal class SubtitleConverter
             items = load();
             cancellationToken.ThrowIfCancellationRequested();
             WritePreservedBitmaps(items, outputFile, options);
-            cancellationToken.ThrowIfCancellationRequested();
             result.SuccessfulFiles++;
             ApplySourceTimestamp(sourceTimestamps, outputFile);
             result.Files.Add(new FileConversionResult(inputFile, outputFile, true, null));
@@ -569,7 +567,6 @@ internal class SubtitleConverter
                     : BitmapSubtitleLoader.LoadMatroskaPgs(matroska, track);
                 cancellationToken.ThrowIfCancellationRequested();
                 WritePreservedBitmaps(items, outputFile, options);
-                cancellationToken.ThrowIfCancellationRequested();
                 result.SuccessfulFiles++;
                 ApplySourceTimestamp(sourceTimestamps, outputFile);
                 result.Files.Add(new FileConversionResult(inputFile, outputFile, true, null));
