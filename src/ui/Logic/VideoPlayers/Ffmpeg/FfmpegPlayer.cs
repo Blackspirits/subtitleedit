@@ -816,6 +816,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                     : 1.0 / 25.0;
 
                 var serial = -1;
+                var minimumReplaySerial = -1;
                 var dropUntil = -1.0;
                 var presentedForSerial = false;
                 VideoFrame? lastDropped = null; // kept so a target past the last picture still shows something
@@ -826,6 +827,19 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                     {
                         continue;
                     }
+
+                    if (minimumReplaySerial >= 0 && entry.Serial < minimumReplaySerial)
+                    {
+                        var stalePacket = entry.Packet;
+                        if (stalePacket != null)
+                        {
+                            ffmpeg.av_packet_free(&stalePacket);
+                        }
+
+                        continue;
+                    }
+
+                    minimumReplaySerial = -1;
 
                     if (entry.Serial != serial)
                     {
@@ -851,7 +865,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                             // The hardware decoder rejected the stream - retry it in software.
                             codec = FallBackToSoftware(codec, stream, sendResult, ref hardware);
                             serial = -1;
-                            Seek(Position);
+                            minimumReplaySerial = RequestHardwareFallbackReplay();
                         }
 
                         continue;
@@ -959,7 +973,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                         // the key frame.
                         codec = FallBackToSoftware(codec, stream, 0, ref hardware);
                         serial = -1;
-                        Seek(Position);
+                        minimumReplaySerial = RequestHardwareFallbackReplay();
                         continue;
                     }
 
@@ -1010,6 +1024,22 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 {
                     ffmpeg.avcodec_free_context(&codec);
                 }
+            }
+        }
+
+        private int RequestHardwareFallbackReplay()
+        {
+            var target = Position;
+            Seek(target);
+
+            // Do not let already-demuxed packets from the failed hardware serial feed the fresh
+            // software decoder before the demux thread performs the seek. A user seek that races
+            // with this one has a higher serial and is also safe to accept.
+            _videoFrames.Flush();
+            _presentWake.Set();
+            lock (_seekLock)
+            {
+                return _requestedSerial;
             }
         }
 
