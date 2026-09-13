@@ -851,6 +851,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                             // The hardware decoder rejected the stream - retry it in software.
                             codec = FallBackToSoftware(codec, stream, sendResult, ref hardware);
                             serial = -1;
+                            Seek(Position);
                         }
 
                         continue;
