@@ -173,6 +173,7 @@ internal sealed class SubtitleTools
         [Description("Image-based inputs: keep only the time codes and skip OCR (text is left empty).")] bool timeCodesOnly = false,
         [Description("OCR engine for image-based inputs: tesseract (default), nocr, binaryocr, ollama, paddle or llamacpp.")] string? ocrEngine = null,
         [Description("OCR language for image-based inputs (Tesseract ISO 639-2 code such as 'eng').")] string? ocrLanguage = null,
+        [Description("NOCR/BinaryOCR database path. Required for ocrEngine 'nocr' (.nocr) and 'binaryocr' (.db); the expected extension is appended when omitted.")] string? ocrDb = null,
         [Description("Output resolution for image-based targets, e.g. '1920x1080'.")] string? resolution = null)
         => RunAsync(async () =>
         {
@@ -229,6 +230,7 @@ internal sealed class SubtitleTools
                 TimeCodesOnly = timeCodesOnly,
                 OcrEngine = string.IsNullOrWhiteSpace(ocrEngine) ? "tesseract" : ocrEngine,
                 OcrLanguage = string.IsNullOrWhiteSpace(ocrLanguage) ? "eng" : ocrLanguage,
+                OcrDb = string.IsNullOrWhiteSpace(ocrDb) ? null : ocrDb,
                 Resolution = string.IsNullOrWhiteSpace(resolution) ? null : ResolutionParser.Parse(resolution),
                 // The converter narrates progress on stdout when not quiet; stdout is the MCP channel.
                 Quiet = true,
