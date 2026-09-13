@@ -80,7 +80,7 @@ public class AccessibleNamesTests
             {
                 foreach (var control in window.GetLogicalDescendants().OfType<Control>())
                 {
-                    if (!AccessibleLabels.IsInput(control) || control.TemplatedParent != null || !control.IsEffectivelyVisible)
+                    if (!AccessibleLabels.IsInput(control) || control.TemplatedParent != null)
                     {
                         continue;
                     }
