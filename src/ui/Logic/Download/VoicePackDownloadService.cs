@@ -28,16 +28,43 @@ public class VoicePackDownloadService : IVoicePackDownloadService
 
     public async Task DownloadPack(VoicePack pack, Stream stream, IProgress<float>? progress, CancellationToken cancellationToken)
     {
-        await DownloadHelper.DownloadFileAsync(_httpClient, pack.Url, stream, progress, cancellationToken);
-
-        if (string.IsNullOrEmpty(pack.Sha256) || stream.Length == 0)
+        if (string.IsNullOrWhiteSpace(pack.Sha256))
         {
-            return;
+            throw new InvalidOperationException($"No SHA-256 is registered for voice pack '{pack.Name}'.");
         }
 
+        if (!stream.CanRead || !stream.CanSeek)
+        {
+            throw new InvalidOperationException("Voice pack integrity verification requires a readable, seekable stream.");
+        }
+
+        await DownloadHelper.DownloadFileAsync(_httpClient, pack.Url, stream, progress, cancellationToken);
+        await VerifyPackAsync(pack, stream, cancellationToken);
+    }
+
+    internal static async Task VerifyPackAsync(VoicePack pack, Stream stream, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(pack.Sha256))
+        {
+            throw new InvalidOperationException($"No SHA-256 is registered for voice pack '{pack.Name}'.");
+        }
+
+        if (!stream.CanRead || !stream.CanSeek)
+        {
+            throw new InvalidOperationException("Voice pack integrity verification requires a readable, seekable stream.");
+        }
+
+        string actual;
         stream.Position = 0;
-        var actual = await Sha256Util.ComputeSha256Async(stream, cancellationToken);
-        stream.Position = 0;
+        try
+        {
+            actual = await Sha256Util.ComputeSha256Async(stream, cancellationToken);
+        }
+        finally
+        {
+            stream.Position = 0;
+        }
+
         if (!string.Equals(pack.Sha256, actual, StringComparison.OrdinalIgnoreCase))
         {
             throw new IOException($"Voice pack '{pack.Name}' failed integrity check (expected SHA-256 {pack.Sha256}, got {actual}).");
