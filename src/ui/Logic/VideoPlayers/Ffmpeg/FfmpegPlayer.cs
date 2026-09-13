@@ -1162,7 +1162,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         /// is attached; the caller can tell by <c>hw_device_ctx</c> being set. Any hardware setup
         /// failure silently means software.
         /// </summary>
-        private AVCodecContext* OpenDecoder(AVStream* stream, bool hardware = false)
+        private AVCodecContext* OpenDecoder(AVStream* stream, bool hardware = false, int hardwareStartIndex = 0)
         {
             var decoder = ffmpeg.avcodec_find_decoder(stream->codecpar->codec_id);
             if (decoder == null)
@@ -1186,10 +1186,12 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             codec->pkt_timebase = stream->time_base;
             codec->thread_count = 0; // auto
 
+            var selectedHardwareIndex = -1;
             if (hardware && stream->codecpar->codec_type == AVMediaType.AVMEDIA_TYPE_VIDEO)
             {
-                foreach (var deviceType in HardwareDeviceTypes)
+                for (var i = hardwareStartIndex; i < HardwareDeviceTypes.Length; i++)
                 {
+                    var deviceType = HardwareDeviceTypes[i];
                     if (!SupportsHardwareDevice(decoder, deviceType))
                     {
                         continue;
@@ -1212,6 +1214,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
 
                     codec->hw_device_ctx = device; // freed with the codec context
                     codec->get_format = GetHardwareFormatDelegate;
+                    selectedHardwareIndex = i;
                     break;
                 }
             }
@@ -1219,12 +1222,12 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             result = ffmpeg.avcodec_open2(codec, decoder, null);
             if (result < 0)
             {
-                if (hardware && codec->hw_device_ctx != null)
+                if (hardware && selectedHardwareIndex >= 0)
                 {
                     var deviceName = HardwareDeviceName(codec);
-                    Se.LogError($"ffmpeg player: {deviceName} decoder open failed for {ffmpeg.avcodec_get_name(stream->codecpar->codec_id)} ({FfmpegLibraries.ErrorText(result)}), falling back to software decoding");
+                    Se.LogError($"ffmpeg player: {deviceName} decoder open failed for {ffmpeg.avcodec_get_name(stream->codecpar->codec_id)} ({FfmpegLibraries.ErrorText(result)}), trying the next hardware decoder or software");
                     ffmpeg.avcodec_free_context(&codec);
-                    return OpenDecoder(stream, hardware: false);
+                    return OpenDecoder(stream, hardware: true, hardwareStartIndex: selectedHardwareIndex + 1);
                 }
 
                 ffmpeg.avcodec_free_context(&codec);
