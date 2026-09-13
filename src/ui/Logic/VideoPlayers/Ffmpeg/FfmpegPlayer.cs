@@ -45,6 +45,8 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
 
     private string _fileName = string.Empty;
     private bool _disposed;
+    private readonly Lock _loadLock = new();
+    private int _loadGeneration;
     private Session? _session;
     private double _volume = 100;
     private double _speed = 1.0;
@@ -130,16 +132,24 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
 
     public Task LoadFile(string fileName, double startPositionSeconds = 0)
     {
-        CloseFile();
-        _fileName = fileName;
+        Session? previousSession;
+        int generation;
+        lock (_loadLock)
+        {
+            // Reserve this open before doing any slow native work. CloseFile or a newer LoadFile
+            // increments the generation, so this Task can never publish an obsolete session after
+            // the caller has already closed/replaced it.
+            generation = ++_loadGeneration;
+            previousSession = _session;
+            _session = null;
+            _fileName = fileName;
+        }
+
+        previousSession?.Dispose();
+        ClearCurrentFrame();
 
         return Task.Run(() =>
         {
-            if (_disposed)
-            {
-                return;
-            }
-
             Session session;
             try
             {
@@ -148,33 +158,54 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             catch (Exception exception)
             {
                 Se.LogError(exception, $"ffmpeg player failed to open: {fileName}");
-                _fileName = string.Empty;
+                lock (_loadLock)
+                {
+                    if (generation == _loadGeneration)
+                    {
+                        _fileName = string.Empty;
+                    }
+                }
+
                 return;
             }
 
-            if (_disposed)
+            lock (_loadLock)
             {
-                session.Dispose();
-                return;
+                if (_disposed || generation != _loadGeneration)
+                {
+                    session.Dispose();
+                    return;
+                }
+
+                session.Volume = _volume;
+                session.Speed = _speed;
+                session.Start();
+
+                // Always seek once: this is what decodes and shows the first picture (at the wanted
+                // position) while the player stays paused.
+                session.Seek(Math.Max(0, startPositionSeconds));
+                _session = session;
             }
-
-            _session = session;
-            session.Volume = _volume;
-            session.Speed = _speed;
-            session.Start();
-
-            // Always seek once: this is what decodes and shows the first picture (at the wanted
-            // position) while the player stays paused.
-            session.Seek(Math.Max(0, startPositionSeconds));
         });
     }
 
     public void CloseFile()
     {
-        var session = Interlocked.Exchange(ref _session, null);
-        _fileName = string.Empty;
-        session?.Dispose();
+        Session? session;
+        lock (_loadLock)
+        {
+            _loadGeneration++;
+            session = _session;
+            _session = null;
+            _fileName = string.Empty;
+        }
 
+        session?.Dispose();
+        ClearCurrentFrame();
+    }
+
+    private void ClearCurrentFrame()
+    {
         lock (_currentFrameLock)
         {
             // The frame belonged to the session's pool, which is gone now.
