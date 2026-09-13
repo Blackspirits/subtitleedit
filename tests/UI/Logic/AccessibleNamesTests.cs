@@ -104,11 +104,12 @@ public class AccessibleNamesTests
     }
 
     /// <summary>
-    /// Runs pending dispatcher jobs, ignoring what they throw. Some view models probe media
-    /// on a background thread from Loaded and post a message box back (Video OCR: "unable
-    /// to read video"); when that post lands after the window is closed, showing the box
-    /// throws "Cannot show a window with a closed owner" - a timing artifact of opening
-    /// windows without files, not an accessibility finding.
+    /// Runs pending dispatcher jobs, tolerating only the known closed-owner race. Some view
+    /// models probe media on a background thread from Loaded and post a message box back (Video
+    /// OCR: "unable to read video"); when that post lands after the window is closed, Avalonia
+    /// throws "Cannot show a window with a closed owner" - a timing artifact of opening windows
+    /// without files, not an accessibility finding. Other dispatcher failures must still fail
+    /// the test instead of being hidden.
     /// </summary>
     private static void DrainJobs()
     {
@@ -116,9 +117,9 @@ public class AccessibleNamesTests
         {
             Dispatcher.UIThread.RunJobs();
         }
-        catch (Exception)
+        catch (InvalidOperationException ex) when (ex.Message == "Cannot show a window with a closed owner.")
         {
-            // Ignored - see summary.
+            // Expected headless-test race - see summary.
         }
     }
 
