@@ -1738,7 +1738,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             _presentWake.Set();
             try
             {
-                _audioSink.Reset();
+                _audioSink?.Reset();
             }
             catch
             {
@@ -1750,7 +1750,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             JoinThread(_audioThread);
             JoinThread(_presentThread);
 
-            _audioSink.Dispose();
+            _audioSink?.Dispose();
             _demuxWake.Dispose();
             _presentWake.Dispose();
 
