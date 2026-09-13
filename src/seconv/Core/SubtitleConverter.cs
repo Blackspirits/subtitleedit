@@ -192,6 +192,10 @@ internal class SubtitleConverter
                         }
                     }
                 }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
                 catch (Exception ex)
                 {
                     var msg = ErrorMessageFormatter.FormatForUser(ex, options.Verbose);
@@ -564,9 +568,7 @@ internal class SubtitleConverter
                     ? BitmapSubtitleLoader.LoadMatroskaVobSub(matroska, track)
                     : BitmapSubtitleLoader.LoadMatroskaPgs(matroska, track);
                 cancellationToken.ThrowIfCancellationRequested();
-                cancellationToken.ThrowIfCancellationRequested();
                 WritePreservedBitmaps(items, outputFile, options);
-                cancellationToken.ThrowIfCancellationRequested();
                 cancellationToken.ThrowIfCancellationRequested();
                 result.SuccessfulFiles++;
                 ApplySourceTimestamp(sourceTimestamps, outputFile);
@@ -575,6 +577,10 @@ internal class SubtitleConverter
                 {
                     AnsiConsole.MarkupLine($" [green]done ({items.Count} bitmap(s)).[/]");
                 }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -657,6 +663,10 @@ internal class SubtitleConverter
                 {
                     AnsiConsole.MarkupLine($" [green]done ({items.Count} bitmap(s)).[/]");
                 }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -770,6 +780,10 @@ internal class SubtitleConverter
                 {
                     AnsiConsole.MarkupLine($" [green]done ({items.Count} bitmap(s)).[/]");
                 }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
