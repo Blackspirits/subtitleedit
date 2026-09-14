@@ -3,6 +3,7 @@ using Nikse.SubtitleEdit.UiLogic.AudioToText;
 using Nikse.SubtitleEdit.Logic.Config;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
 
@@ -10,6 +11,44 @@ namespace Nikse.SubtitleEdit.Features.Video.SpeechToText.Engines;
 
 public abstract class CrispAsrEngineBase : ICrispAsrEngine
 {
+    public static string AutoDownloadModelsFolder
+    {
+        get
+        {
+            if (Se.HasCustomModelsFolder)
+            {
+                return Se.CrispAsrModelsFolder;
+            }
+
+            // Match CrispASR's documented cache precedence in legacy mode so SE can reuse
+            // models downloaded by a caller-level/global CrispASR configuration too.
+            var cacheDirectory = Environment.GetEnvironmentVariable("CRISPASR_CACHE_DIR");
+            if (!string.IsNullOrWhiteSpace(cacheDirectory))
+            {
+                return cacheDirectory;
+            }
+
+            var modelsDirectory = Environment.GetEnvironmentVariable("CRISPASR_MODELS_DIR");
+            return !string.IsNullOrWhiteSpace(modelsDirectory)
+                ? modelsDirectory
+                : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "crispasr");
+        }
+    }
+
+    public static void ConfigureModelEnvironment(ProcessStartInfo startInfo)
+    {
+        ArgumentNullException.ThrowIfNull(startInfo);
+        if (!Se.HasCustomModelsFolder)
+        {
+            return;
+        }
+
+        var folder = Se.CrispAsrModelsFolder;
+        Directory.CreateDirectory(folder);
+        startInfo.EnvironmentVariables["CRISPASR_MODELS_DIR"] = folder;
+        startInfo.EnvironmentVariables["CRISPASR_CACHE_DIR"] = folder;
+    }
+
     public abstract string Name { get; }
     public abstract string Choice { get; }
     public abstract string Url { get; }

@@ -253,7 +253,7 @@ public class Qwen3TtsCrispAsr : ITtsEngine, IPerLineCloneEngine
         // than under TextToSpeech/Qwen3TtsCrispAsr/. The voices folder and synth
         // output WAVs still live under TextToSpeech/Qwen3TtsCrispAsr/ since those
         // are TTS-engine state, not models. Mirrors ChatterboxTtsCpp's layout.
-        var modelsFolder = Path.Combine(Se.CrispAsrFolder, "models");
+        var modelsFolder = Se.CrispAsrModelsFolder;
         if (!Directory.Exists(modelsFolder))
         {
             Directory.CreateDirectory(modelsFolder);
@@ -837,8 +837,7 @@ public class Qwen3TtsCrispAsr : ITtsEngine, IPerLineCloneEngine
     /// Exposed so the SE downloader can copy already-cached files instead of re-pulling 2 GB,
     /// and so settings UI can reference the same location.
     /// </summary>
-    public static string GetCrispAsrCacheFolder() =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "crispasr");
+    public static string GetCrispAsrCacheFolder() => CrispAsrEngineBase.AutoDownloadModelsFolder;
 
     /// <summary>
     /// Best-effort copy of <paramref name="fileName"/> from <see cref="GetCrispAsrCacheFolder"/>
@@ -1210,7 +1209,8 @@ public class Qwen3TtsCrispAsr : ITtsEngine, IPerLineCloneEngine
             psi.ArgumentList.Add(GetSetVoicesFolder());
             CrispAsrTtsProvenance.AddServerMarkingArgs(psi.ArgumentList, exe);
 
-            var process = Process.Start(psi)
+            CrispAsrEngineBase.ConfigureModelEnvironment(psi);
+        var process = Process.Start(psi)
                 ?? throw new InvalidOperationException("Failed to start crispasr (qwen3-tts)");
 
             var launchCommand = FormatLaunchCommand(exe, psi.ArgumentList);

@@ -335,8 +335,7 @@ public class Confucius4TtsCrispAsr : ITtsEngine
     /// Path crispasr's --auto-download writes GGUFs to, so SE's downloader can adopt files a
     /// previous CLI run already fetched instead of re-pulling gigabytes.
     /// </summary>
-    public static string GetCrispAsrCacheFolder() =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "crispasr");
+    public static string GetCrispAsrCacheFolder() => CrispAsrEngineBase.AutoDownloadModelsFolder;
 
     public static bool TrySeedModelFromCrispAsrCache(string fileName, string destinationPath)
     {
@@ -639,7 +638,8 @@ public class Confucius4TtsCrispAsr : ITtsEngine
             psi.ArgumentList.Add(odeSteps.ToString(CultureInfo.InvariantCulture));
             CrispAsrTtsProvenance.AddServerMarkingArgs(psi.ArgumentList, exe);
 
-            var process = Process.Start(psi)
+            CrispAsrEngineBase.ConfigureModelEnvironment(psi);
+        var process = Process.Start(psi)
                 ?? throw new InvalidOperationException("Failed to start crispasr (confucius4-tts)");
 
             var launchCommand = FormatLaunchCommand(exe, psi.ArgumentList);

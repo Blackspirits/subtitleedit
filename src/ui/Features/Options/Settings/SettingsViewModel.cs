@@ -183,6 +183,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private ObservableCollection<string> _defaultSaveLocationTypes;
     [ObservableProperty] private string _selectedDefaultSaveLocationType;
     [ObservableProperty] private string _defaultSaveLocationCustomFolder = string.Empty;
+    [ObservableProperty] private string _modelsFolder = string.Empty;
     [ObservableProperty] private bool _isDefaultSaveLocationCustomFolderEnabled;
     [ObservableProperty] private string _selectedSaveAsBehaviorType;
 
@@ -795,6 +796,7 @@ public partial class SettingsViewModel : ObservableObject
         SelectedSaveAsAppendLanguageCode = MapFromSelectedSaveAsAppendLanguageCode(Se.Settings.General.SaveAsAppendLanguageCode);
         SelectedDefaultSaveLocationType = MapFromDefaultSaveLocation(Se.Settings.General.DefaultSaveLocation);
         DefaultSaveLocationCustomFolder = Se.Settings.General.DefaultSaveLocationCustomFolder ?? string.Empty;
+        ModelsFolder = Se.Settings.General.ModelsFolder ?? string.Empty;
         AutoConvertToUtf8 = general.AutoConvertToUtf8;
         ForceCrLfOnSave = general.ForceCrLfOnSave;
         ShowFormatLimitWarning = general.ShowFormatLimitWarning;
@@ -1346,6 +1348,21 @@ public partial class SettingsViewModel : ObservableObject
         }
     }
 
+    [RelayCommand]
+    private async Task BrowseModelsFolder()
+    {
+        if (Window == null)
+        {
+            return;
+        }
+
+        var folder = await _folderHelper.PickFolderAsync(Window, Se.Language.Options.Settings.ModelsFolder);
+        if (!string.IsNullOrEmpty(folder))
+        {
+            ModelsFolder = folder;
+        }
+    }
+
     private static string MapFromSelectedSaveAsAppendLanguageCode(string languageAppendType)
     {
         if (languageAppendType == nameof(SaveAsLanguageAppendType.TwoLetterLanguageCode))
@@ -1684,6 +1701,7 @@ public partial class SettingsViewModel : ObservableObject
         general.SaveAsAppendLanguageCode = MapToSaveAsAppendLanguageCode(SelectedSaveAsAppendLanguageCode);
         general.DefaultSaveLocation = MapToDefaultSaveLocation(SelectedDefaultSaveLocationType);
         general.DefaultSaveLocationCustomFolder = DefaultSaveLocationCustomFolder;
+        general.ModelsFolder = ModelsFolder?.Trim() ?? string.Empty;
         general.AutoConvertToUtf8 = AutoConvertToUtf8;
         general.ForceCrLfOnSave = ForceCrLfOnSave;
         general.ShowFormatLimitWarning = ShowFormatLimitWarning;

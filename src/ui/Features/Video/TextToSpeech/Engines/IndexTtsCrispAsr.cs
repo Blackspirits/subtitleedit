@@ -190,7 +190,7 @@ public class IndexTtsCrispAsr : ITtsEngine
     {
         // Like the other CrispASR-backed engines, the GGUFs live alongside CrispASR's
         // speech-to-text models in CrispASR/models/ rather than under TextToSpeech/.
-        var modelsFolder = Path.Combine(Se.CrispAsrFolder, "models");
+        var modelsFolder = Se.CrispAsrModelsFolder;
         if (!Directory.Exists(modelsFolder))
         {
             Directory.CreateDirectory(modelsFolder);
@@ -269,8 +269,7 @@ public class IndexTtsCrispAsr : ITtsEngine
     /// Path crispasr's --auto-download writes GGUFs to. Mirrors the Qwen3 (CrispASR) helper so
     /// the SE-side downloader can adopt already-cached files instead of re-pulling ~870 MB.
     /// </summary>
-    public static string GetCrispAsrCacheFolder() =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "crispasr");
+    public static string GetCrispAsrCacheFolder() => CrispAsrEngineBase.AutoDownloadModelsFolder;
 
     /// <summary>
     /// Best-effort copy of <paramref name="fileName"/> from <see cref="GetCrispAsrCacheFolder"/>
@@ -578,7 +577,8 @@ public class IndexTtsCrispAsr : ITtsEngine
             psi.ArgumentList.Add(voicePath);
             CrispAsrTtsProvenance.AddServerMarkingArgs(psi.ArgumentList, exe);
 
-            var process = Process.Start(psi)
+            CrispAsrEngineBase.ConfigureModelEnvironment(psi);
+        var process = Process.Start(psi)
                 ?? throw new InvalidOperationException("Failed to start crispasr (indextts)");
 
             var launchCommand = FormatLaunchCommand(exe, psi.ArgumentList);

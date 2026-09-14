@@ -231,7 +231,7 @@ public class OmniVoiceCrispAsr : ITtsEngine
 
     public static string GetSetModelsFolder()
     {
-        var modelsFolder = Path.Combine(Se.CrispAsrFolder, "models");
+        var modelsFolder = Se.CrispAsrModelsFolder;
         if (!Directory.Exists(modelsFolder))
         {
             Directory.CreateDirectory(modelsFolder);
@@ -310,8 +310,7 @@ public class OmniVoiceCrispAsr : ITtsEngine
     public static string GetTokenizerPath() =>
         Path.Combine(GetSetModelsFolder(), TokenizerFileName);
 
-    public static string GetCrispAsrCacheFolder() =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "crispasr");
+    public static string GetCrispAsrCacheFolder() => CrispAsrEngineBase.AutoDownloadModelsFolder;
 
     public static bool TrySeedModelFromCrispAsrCache(string fileName, string destinationPath)
     {
@@ -642,7 +641,8 @@ public class OmniVoiceCrispAsr : ITtsEngine
                 }
             }
 
-            var process = Process.Start(psi)
+            CrispAsrEngineBase.ConfigureModelEnvironment(psi);
+        var process = Process.Start(psi)
                 ?? throw new InvalidOperationException("Failed to start crispasr (omnivoice)");
 
             var launchCommand = FormatLaunchCommand(exe, psi.ArgumentList);

@@ -263,7 +263,7 @@ public class CosyVoice3CrispAsr : ITtsEngine, IPerLineCloneEngine
 
     public static string GetSetModelsFolder()
     {
-        var modelsFolder = Path.Combine(Se.CrispAsrFolder, "models");
+        var modelsFolder = Se.CrispAsrModelsFolder;
         if (!Directory.Exists(modelsFolder))
         {
             Directory.CreateDirectory(modelsFolder);
@@ -369,8 +369,7 @@ public class CosyVoice3CrispAsr : ITtsEngine, IPerLineCloneEngine
     public static string GetLlmPath(string? modelKey = null) =>
         Path.Combine(GetSetModelsFolder(), GetLlmFileName(modelKey));
 
-    public static string GetCrispAsrCacheFolder() =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "crispasr");
+    public static string GetCrispAsrCacheFolder() => CrispAsrEngineBase.AutoDownloadModelsFolder;
 
     public static bool TrySeedModelFromCrispAsrCache(string fileName, string destinationPath)
     {
@@ -881,7 +880,8 @@ public class CosyVoice3CrispAsr : ITtsEngine, IPerLineCloneEngine
 
             CrispAsrTtsProvenance.AddServerMarkingArgs(psi.ArgumentList, exe);
 
-            var process = Process.Start(psi)
+            CrispAsrEngineBase.ConfigureModelEnvironment(psi);
+        var process = Process.Start(psi)
                 ?? throw new InvalidOperationException("Failed to start crispasr (cosyvoice3-tts)");
 
             var launchCommand = FormatLaunchCommand(exe, psi.ArgumentList);
