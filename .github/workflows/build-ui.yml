@@ -981,7 +981,7 @@ jobs:
             - **Linux x64 (tarball):** [SubtitleEdit-Linux-x64.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.tag }}/SubtitleEdit-Linux-x64.tar.gz)
             - **Linux ARM64 (tarball, aarch64):** [SubtitleEdit-Linux-ARM64.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.tag }}/SubtitleEdit-Linux-ARM64.tar.gz)
             - **Linux x64 (Flatpak):** [SubtitleEdit-linux-x64.flatpak](https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.tag }}/SubtitleEdit-linux-x64.flatpak)
-            - **Logitech Options+ plugin (optional):** [Logi Marketplace](https://marketplace.logi.com/plugin/SubtitleEdit/en) — the workflow also attaches the pinned, SHA-256-verified v1.3.1 package when the external download succeeds.
+            - **Logitech Options+ plugin (optional):** [Logi Marketplace](https://marketplace.logi.com/plugin/SubtitleEdit/en) — the workflow also attaches the pinned, SHA-256-verified v1.3.1 package and its MIT license notice when the external download succeeds.
       
             ### Installation
             1. Read and fix requirements, please see [System Requirements](https://github.com/SubtitleEdit/subtitleedit#-system-requirements)
@@ -1032,12 +1032,39 @@ jobs:
           echo "$LOGI_PLUGIN_SHA256  $LOGI_PLUGIN_ASSET" | sha256sum -c -
           mv "$LOGI_PLUGIN_ASSET" SubtitleEdit-LogiOptionsPlus-Plugin.lplug4
 
+          # Preserve the third-party MIT notice alongside the redistributed package.
+          # Source: muaz978/subtitleedit-logi-plugin, tag v1.3.1, LICENSE.
+          cat > SubtitleEdit-LogiOptionsPlus-Plugin-LICENSE.txt <<'EOF'
+          MIT License
+
+          Copyright (c) 2026 Muaz Sabbagh
+
+          Permission is hereby granted, free of charge, to any person obtaining a copy
+          of this software and associated documentation files (the "Software"), to deal
+          in the Software without restriction, including without limitation the rights
+          to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+          copies of the Software, and to permit persons to whom the Software is
+          furnished to do so, subject to the following conditions:
+
+          The above copyright notice and this permission notice shall be included in all
+          copies or substantial portions of the Software.
+
+          THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+          IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+          FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+          AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+          LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+          OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+          SOFTWARE.
+          EOF
+
       - name: Attach verified Logitech Options+ plugin
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload "${{ needs.create-release.outputs.release_tag }}" \
             SubtitleEdit-LogiOptionsPlus-Plugin.lplug4 \
+            SubtitleEdit-LogiOptionsPlus-Plugin-LICENSE.txt \
             --repo "${{ github.repository }}" \
             --clobber
 
