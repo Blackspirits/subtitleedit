@@ -981,6 +981,7 @@ jobs:
             - **Linux x64 (tarball):** [SubtitleEdit-Linux-x64.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.tag }}/SubtitleEdit-Linux-x64.tar.gz)
             - **Linux ARM64 (tarball, aarch64):** [SubtitleEdit-Linux-ARM64.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.tag }}/SubtitleEdit-Linux-ARM64.tar.gz)
             - **Linux x64 (Flatpak):** [SubtitleEdit-linux-x64.flatpak](https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.tag }}/SubtitleEdit-linux-x64.flatpak)
+            - **Logitech Options+ plugin (optional):** [Logi Marketplace](https://marketplace.logi.com/plugin/SubtitleEdit/en) — the workflow also attaches the pinned, SHA-256-verified v1.3.1 package when the external download succeeds.
       
             ### Installation
             1. Read and fix requirements, please see [System Requirements](https://github.com/SubtitleEdit/subtitleedit#-system-requirements)
@@ -1003,6 +1004,42 @@ jobs:
             ./release-assets/SubtitleEdit-Linux-x64.tar.gz
             ./release-assets/SubtitleEdit-Linux-ARM64.tar.gz
             ./release-assets/SubtitleEdit-linux-x64.flatpak
+
+  attach-logi-plugin:
+    # Optional third-party release asset. Keep it outside create-release so an outage in
+    # the external plugin repository cannot block Subtitle Edit's first-party release.
+    needs: [create-release]
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: write
+    env:
+      LOGI_PLUGIN_REPO: muaz978/subtitleedit-logi-plugin
+      LOGI_PLUGIN_TAG: v1.3.1
+      LOGI_PLUGIN_ASSET: SubtitleEdit_1_3_1.lplug4
+      LOGI_PLUGIN_SHA256: ec5c6b5e28bfe6ed8b8cb4a919c1bb7dd512100523fba811c3c6b10c32a8ea54
+
+    steps:
+      - name: Download and verify pinned Logitech Options+ plugin
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release download "$LOGI_PLUGIN_TAG" \
+            --repo "$LOGI_PLUGIN_REPO" \
+            --pattern "$LOGI_PLUGIN_ASSET" \
+            --output "$LOGI_PLUGIN_ASSET"
+          echo "$LOGI_PLUGIN_SHA256  $LOGI_PLUGIN_ASSET" | sha256sum -c -
+          mv "$LOGI_PLUGIN_ASSET" SubtitleEdit-LogiOptionsPlus-Plugin.lplug4
+
+      - name: Attach verified Logitech Options+ plugin
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ needs.create-release.outputs.release_tag }}" \
+            SubtitleEdit-LogiOptionsPlus-Plugin.lplug4 \
+            --repo "${{ github.repository }}" \
+            --clobber
 
   call-seconv:
     needs: [create-release]
