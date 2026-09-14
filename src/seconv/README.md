@@ -57,6 +57,23 @@ An unrecognised option is an error, never a silent no-op: `seconv` exits 1 and n
 real option rather than converting the file without the operation that was asked for. Exit codes
 are only ever 0 (success) or 1 (any failure).
 
+## MCP server
+
+`seconv mcp` runs the same engine as a [Model Context Protocol](https://modelcontextprotocol.io) server
+over stdio, so an AI client can inspect and convert subtitles without a shell. Register it as a stdio server:
+
+```json
+{ "mcpServers": { "seconv": { "command": "seconv", "args": ["mcp"] } } }
+```
+
+Tools: `list_formats`, `subtitle_info`, `read_subtitle` (paged paragraphs of any format), `lint_subtitle`,
+`convert_subtitle` (format, encoding, offset, fps, operations such as FixCommonErrors, ...),
+`list_fix_common_errors_rules`, `list_remove_formatting_rules`. `convert_subtitle` exposes a focused subset of the CLI conversion options; use the CLI directly for advanced controls such as translation, image styling, custom-format/settings overlays and the newest specialist flags. Read-only tools are advertised as
+non-destructive; `convert_subtitle` is explicitly destructive-capable because `overwrite=true` can replace files.
+Logs go to stderr; add `--verbose` for debug output. Client cancellation is propagated cooperatively into conversion.
+The server does not add its own filesystem sandbox: input/output paths are local paths accessible to the `seconv` process and remain subject to the operating system's permissions and the MCP client's approval/policy.
+A failed or cancelled multi-file conversion may have completed earlier output files before the later failure/cancellation. Inspect per-file results and existing outputs before retrying; do not assume an MCP error means that no filesystem changes occurred.
+
 ## Full reference
 
 ➡ **[Command Line (seconv) — full reference](../../docs/reference/command-line.md)**
