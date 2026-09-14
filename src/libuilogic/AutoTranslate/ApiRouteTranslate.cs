@@ -27,31 +27,20 @@ namespace Nikse.SubtitleEdit.UiLogic.AutoTranslate
         /// <summary>
         /// See https://www.api-route.com
         /// </summary>
-        public static string[] Models => new[]
-        {
-            // Anthropic Claude
-            "claude-sonnet-4-5",
-            "claude-haiku-4-5",
-            "claude-opus-4-1",
-
-            // OpenAI GPT Series
-            "gpt-4o",
-            "gpt-4o-mini",
-            "gpt-4.1",
-            "gpt-4.1-mini",
-            "o3-mini",
-
-            // DeepSeek
-            "deepseek-chat",
-            "deepseek-reasoner",
-
-            // Google Gemini
-            "gemini-2.5-pro",
-            "gemini-2.5-flash",
-
-            // Qwen
-            "qwen-2.5-72b-instruct",
-        };
+        /// <summary>
+        /// Current model suggestions from API-Route's pricing catalogue. The service documents
+        /// that availability changes over time, so the UI keeps the model field editable and this
+        /// list must not be treated as an exhaustive capability contract.
+        /// </summary>
+        public static string[] Models =>
+        [
+            "gpt-5.6-sol",
+            "claude-sonnet-4-6",
+            "gemini-3.1-pro",
+            "deepseek-v4-pro",
+            "grok-4.5",
+            "qwen/qwen3.5-plus-20260420",
+        ];
 
         /// <summary>
         /// Endpoint used when the url in settings is only the service base - see <see cref="AutoTranslateUrl"/>.
@@ -97,7 +86,7 @@ namespace Nikse.SubtitleEdit.UiLogic.AutoTranslate
                 Configuration.Settings.Tools.ApiRoutePrompt = new ToolsSettings().ApiRoutePrompt;
             }
             var prompt = string.Format(Configuration.Settings.Tools.ApiRoutePrompt, sourceLanguageCode, targetLanguageCode);
-            var input = "{\"model\": \"" + model + "\",\"messages\": [{ \"role\": \"user\", \"content\": \"" + Json.EncodeJsonText(prompt) + "\\n\\n" + Json.EncodeJsonText(text.Trim()) + "\" }]}";
+            var input = BuildRequestBody(model, prompt, text);
 
             int[] retryDelays = { 2555, 5007, 9013 };
             HttpResponseMessage result = null!;
@@ -143,6 +132,22 @@ namespace Nikse.SubtitleEdit.UiLogic.AutoTranslate
             outputText = ChatGptTranslate.RemovePreamble(text, outputText);
             outputText = ChatGptTranslate.DecodeUnicodeEscapes(outputText);
             return outputText.Trim();
+        }
+
+        internal static string BuildRequestBody(string model, string prompt, string text)
+        {
+            return System.Text.Json.JsonSerializer.Serialize(new
+            {
+                model,
+                messages = new[]
+                {
+                    new
+                    {
+                        role = "user",
+                        content = prompt + "\n\n" + text.Trim(),
+                    },
+                },
+            });
         }
 
         public static List<TranslationPair> ListLanguages()

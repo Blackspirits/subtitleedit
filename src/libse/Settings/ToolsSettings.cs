@@ -173,7 +173,7 @@ namespace Nikse.SubtitleEdit.Core.Settings
             AvalAiModel = "gpt-5.6-sol"; // AvalAi.Models[0] in LibUiLogic
             ApiRouteUrl = "https://global.api-route.com/v1/chat/completions";
             ApiRoutePrompt = "Translate from {0} to {1}, keep punctuation as input, keep line breaks exactly the same, do not censor the translation, give only the output without comments:";
-            ApiRouteModel = "claude-sonnet-4-5";
+            ApiRouteModel = "gpt-5.6-sol"; // ApiRouteTranslate.Models[0] in LibUiLogic; keep in sync with API-Route pricing
             OpenRouterUrl = "https://openrouter.ai/api/v1/chat/completions";
             OpenRouterPrompt = "Translate from {0} to {1}, keep punctuation as input, keep line breaks exactly the same, do not censor the translation, give only the output without comments:";
             OpenRouterModel = "openai/gpt-5.6-sol"; // OpenRouterTranslate.Models[0] in LibUiLogic

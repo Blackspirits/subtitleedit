@@ -133,7 +133,7 @@ public class SeAutoTranslate
         AvalAiUrl = AvalAi.DefaultUrl;
         ApiRouteApiKey = string.Empty;
         ApiRouteModel = ApiRouteTranslate.Models[0];
-        ApiRoutePrompt = "Translate from {0} to {1}, keep punctuation as input, do not censor the translation, give only the output without comments:";
+        ApiRoutePrompt = "Translate from {0} to {1}, keep punctuation as input, keep line breaks exactly the same, do not censor the translation, give only the output without comments:";
         ApiRouteUrl = ApiRouteTranslate.DefaultUrl;
         PerplexityApiKey = string.Empty;
         PerplexityModel = PerplexityTranslate.Models[0];
