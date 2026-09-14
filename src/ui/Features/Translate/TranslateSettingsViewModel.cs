@@ -74,6 +74,7 @@ public partial class TranslateSettingsViewModel : ObservableObject
             engineType == typeof(PerplexityTranslate) ||
             engineType == typeof(GroqTranslate) ||
             engineType == typeof(OpenRouterTranslate) ||
+            engineType == typeof(ApiRouteTranslate) ||
             engineType == typeof(NvidiaTranslate) ||
             engineType == typeof(MistralTranslate) ||
             engineType == typeof(GeminiTranslate) ||
@@ -166,6 +167,11 @@ public partial class TranslateSettingsViewModel : ObservableObject
             {
                 Se.Settings.AutoTranslate.OpenRouterPrompt = PromptText;
                 Configuration.Settings.Tools.OpenRouterPrompt = PromptText;
+            }
+            else if (engineType == typeof(ApiRouteTranslate))
+            {
+                Se.Settings.AutoTranslate.ApiRoutePrompt = PromptText;
+                Configuration.Settings.Tools.ApiRoutePrompt = PromptText;
             }
             else if (engineType == typeof(NvidiaTranslate))
             {
@@ -278,6 +284,11 @@ public partial class TranslateSettingsViewModel : ObservableObject
         if (engineType == typeof(OpenRouterTranslate))
         {
             return settings.OpenRouterPrompt;
+        }
+
+        if (engineType == typeof(ApiRouteTranslate))
+        {
+            return settings.ApiRoutePrompt;
         }
 
         if (engineType == typeof(NvidiaTranslate))

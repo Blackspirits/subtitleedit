@@ -4,6 +4,7 @@ using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 using Avalonia.LogicalTree;
+using Nikse.SubtitleEdit.Core.Common;
 using Nikse.SubtitleEdit.Features.Translate;
 using Nikse.SubtitleEdit.Logic.Config;
 using Nikse.SubtitleEdit.UiLogic.AutoTranslate;
@@ -99,4 +100,39 @@ public class TranslateSettingsResetPromptTests : IDisposable
         Assert.NotNull(button);
         Assert.False(button!.IsEffectivelyVisible);
     }
+    [AvaloniaFact]
+    public void ApiRoutePrompt_IsVisibleResettableAndSaved()
+    {
+        var savedPrompt = Se.Settings.AutoTranslate.ApiRoutePrompt;
+        var savedCorePrompt = Configuration.Settings.Tools.ApiRoutePrompt;
+        try
+        {
+            Se.Settings.AutoTranslate.ApiRoutePrompt = "My API-Route prompt from {0} to {1}";
+            Configuration.Settings.Tools.ApiRoutePrompt = Se.Settings.AutoTranslate.ApiRoutePrompt;
+
+            var vm = new TranslateSettingsViewModel();
+            vm.LoadValues(new ApiRouteTranslate());
+
+            Assert.True(vm.PromptIsVisible);
+            Assert.Equal("My API-Route prompt from {0} to {1}", vm.PromptText);
+
+            vm.ResetPromptCommand.Execute(null);
+
+            var builtIn = new SeAutoTranslate().ApiRoutePrompt;
+            Assert.Contains("keep line breaks exactly the same", builtIn);
+            Assert.Equal(builtIn, vm.PromptText);
+
+            vm.PromptText = "Saved API-Route prompt from {0} to {1}";
+            vm.SaveValues();
+
+            Assert.Equal(vm.PromptText, Se.Settings.AutoTranslate.ApiRoutePrompt);
+            Assert.Equal(vm.PromptText, Configuration.Settings.Tools.ApiRoutePrompt);
+        }
+        finally
+        {
+            Se.Settings.AutoTranslate.ApiRoutePrompt = savedPrompt;
+            Configuration.Settings.Tools.ApiRoutePrompt = savedCorePrompt;
+        }
+    }
+
 }
