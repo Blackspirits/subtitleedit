@@ -84,13 +84,13 @@ public class Piper : ITtsEngine
             return false;
         }
 
-        var modelFileName = Path.Combine(GetSetPiperFolder(), piperVoice.ModelShort);
+        var modelFileName = Path.Combine(GetSetModelsFolder(), piperVoice.ModelShort);
         if (!File.Exists(modelFileName))
         {
             return false;
         }
 
-        var configFileName = Path.Combine(GetSetPiperFolder(), piperVoice.ConfigShort);
+        var configFileName = Path.Combine(GetSetModelsFolder(), piperVoice.ConfigShort);
         if (!File.Exists(configFileName))
         {
             return false;
@@ -129,6 +129,17 @@ public class Piper : ITtsEngine
         }
 
         return piperFolder;
+    }
+
+    public static string GetSetModelsFolder()
+    {
+        var folder = Se.PiperModelsFolder;
+        if (!Directory.Exists(folder))
+        {
+            Directory.CreateDirectory(folder);
+        }
+
+        return folder;
     }
 
     public Task<TtsLanguage[]> GetLanguages(Voice voice, string? model)
@@ -185,9 +196,9 @@ public class Piper : ITtsEngine
 
     /// <summary>
     /// Lists user-added voice models (a <c>.onnx</c> + <c>.onnx.json</c> pair dropped in the
-    /// Piper folder, e.g. via "Import voice") that are not part of the official voice list.
-    /// Model/Config hold bare file names - Speak runs piper with the Piper folder as working
-    /// directory, so bare names resolve the same way as downloaded voices.
+    /// Piper model folder, e.g. via "Import voice") that are not part of the official voice list.
+    /// Model/Config keep bare names for voice identity; execution resolves them against the
+    /// configured model folder so the Piper runtime itself can stay in the application-data folder.
     /// </summary>
     private static void AddCustomVoices(List<Voice> result)
     {
@@ -197,7 +208,7 @@ public class Piper : ITtsEngine
             .Select(v => v.ModelShort)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var modelFileName in Directory.GetFiles(GetSetPiperFolder(), "*.onnx"))
+        foreach (var modelFileName in Directory.GetFiles(GetSetModelsFolder(), "*.onnx"))
         {
             var modelNameOnly = Path.GetFileName(modelFileName);
             if (knownModelNames.Contains(modelNameOnly))
@@ -334,7 +345,7 @@ public class Piper : ITtsEngine
                 FileName = GetPiperExecutableFileName(),
                 // -f is quoted: the output file now lives in the caller's run folder (an absolute
                 // path that can contain spaces), not a bare GUID name in the piper folder.
-                Arguments = $"-m \"{voice.ModelShort}\" -c \"{voice.ConfigShort}\" -f \"{outputFileName}\"",
+                Arguments = $"-m \"{Path.Combine(GetSetModelsFolder(), voice.ModelShort)}\" -c \"{Path.Combine(GetSetModelsFolder(), voice.ConfigShort)}\" -f \"{outputFileName}\"",
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 RedirectStandardInput = true,
@@ -371,7 +382,7 @@ public class Piper : ITtsEngine
 
     /// <summary>
     /// Imports a custom Piper voice: a <c>.onnx</c> model with its <c>.onnx.json</c> config as
-    /// a sibling file. Both are copied into the Piper folder and the voice shows up in the
+    /// a sibling file. Both are copied into the Piper model folder and the voice shows up in the
     /// voice list (via <see cref="AddCustomVoices"/>) as "Custom - name".
     /// </summary>
     public bool ImportVoice(string fileName)
@@ -389,9 +400,9 @@ public class Piper : ITtsEngine
 
         try
         {
-            var piperFolder = GetSetPiperFolder();
-            var targetModel = Path.Combine(piperFolder, Path.GetFileName(fileName));
-            var targetConfig = Path.Combine(piperFolder, Path.GetFileName(configFileName));
+            var modelsFolder = GetSetModelsFolder();
+            var targetModel = Path.Combine(modelsFolder, Path.GetFileName(fileName));
+            var targetConfig = Path.Combine(modelsFolder, Path.GetFileName(configFileName));
 
             if (!string.Equals(Path.GetFullPath(fileName), Path.GetFullPath(targetModel), StringComparison.OrdinalIgnoreCase))
             {

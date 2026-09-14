@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -44,6 +45,18 @@ public class WhisperEngineWhisperX : ISpeechToTextEngine
     public bool IsEngineInstalled()
     {
         return File.Exists(GetExecutable());
+    }
+
+    public static void ConfigureModelEnvironment(ProcessStartInfo startInfo)
+    {
+        ArgumentNullException.ThrowIfNull(startInfo);
+        if (!Se.HasCustomModelsFolder)
+        {
+            return;
+        }
+
+        startInfo.EnvironmentVariables["HF_HOME"] =
+            Path.Combine(Se.ModelsFolder, "SpeechToText", "HuggingFace");
     }
 
     public override string ToString()

@@ -328,8 +328,7 @@ public class DotsTtsCrispAsr : ITtsEngine
     /// Path crispasr's --auto-download writes GGUFs to, so SE's downloader can adopt files a
     /// previous CLI run already fetched instead of re-pulling gigabytes.
     /// </summary>
-    public static string GetCrispAsrCacheFolder() =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "crispasr");
+    public static string GetCrispAsrCacheFolder() => CrispAsrEngineBase.AutoDownloadModelsFolder;
 
     public static bool TrySeedModelFromCrispAsrCache(string fileName, string destinationPath)
     {
@@ -617,7 +616,8 @@ public class DotsTtsCrispAsr : ITtsEngine
             // dialog is the value actually used.
             psi.Environment[OdeStepsEnvironmentVariable] = odeSteps.ToString(CultureInfo.InvariantCulture);
 
-            var process = Process.Start(psi)
+            CrispAsrEngineBase.ConfigureModelEnvironment(psi);
+        var process = Process.Start(psi)
                 ?? throw new InvalidOperationException("Failed to start crispasr (dots-tts)");
 
             var launchCommand = FormatLaunchCommand(exe, psi.ArgumentList);

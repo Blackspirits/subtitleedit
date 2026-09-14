@@ -295,8 +295,7 @@ public class PocketTtsCrispAsr : ITtsEngine, IPerLineCloneEngine
     /// Path crispasr's --auto-download writes GGUFs to. Mirrors the IndexTTS (CrispASR) helper
     /// so the SE-side downloader can adopt already-cached files instead of re-pulling.
     /// </summary>
-    public static string GetCrispAsrCacheFolder() =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "crispasr");
+    public static string GetCrispAsrCacheFolder() => CrispAsrEngineBase.AutoDownloadModelsFolder;
 
     /// <summary>
     /// Best-effort copy of <paramref name="fileName"/> from <see cref="GetCrispAsrCacheFolder"/>
@@ -696,7 +695,8 @@ public class PocketTtsCrispAsr : ITtsEngine, IPerLineCloneEngine
             psi.ArgumentList.Add(voicePath);
             CrispAsrTtsProvenance.AddServerMarkingArgs(psi.ArgumentList, exe);
 
-            var process = Process.Start(psi)
+            CrispAsrEngineBase.ConfigureModelEnvironment(psi);
+        var process = Process.Start(psi)
                 ?? throw new InvalidOperationException("Failed to start crispasr (pocket-tts)");
 
             var launchCommand = FormatLaunchCommand(exe, psi.ArgumentList);
