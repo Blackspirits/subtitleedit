@@ -254,6 +254,16 @@ public class FfmpegPlayerTests
         Assert.False(FfmpegPlayer.ShouldResendPacket(ffmpeg.AVERROR_EOF, receivedOutput: true, interrupted: false));
     }
 
+    [Fact]
+    public void ShouldReplayHardwareSendFailure_OnlyForFatalHardwareErrors()
+    {
+        Assert.True(FfmpegPlayer.ShouldReplayHardwareSendFailure(-1234, hardware: true));
+        Assert.False(FfmpegPlayer.ShouldReplayHardwareSendFailure(-1234, hardware: false));
+        Assert.False(FfmpegPlayer.ShouldReplayHardwareSendFailure(-ffmpeg.EAGAIN, hardware: true));
+        Assert.False(FfmpegPlayer.ShouldReplayHardwareSendFailure(ffmpeg.AVERROR_EOF, hardware: true));
+        Assert.False(FfmpegPlayer.ShouldReplayHardwareSendFailure(0, hardware: true));
+    }
+
     [Theory]
     [InlineData(AVSampleFormat.AV_SAMPLE_FMT_U8, false)]
     [InlineData(AVSampleFormat.AV_SAMPLE_FMT_S16, false)]

@@ -414,6 +414,19 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         return sendResult == -ffmpeg.EAGAIN && receivedOutput && !interrupted;
     }
 
+    /// <summary>
+    /// A fatal send error from an active hardware decoder requires a software reopen plus replay.
+    /// The new decoder has no GOP reference state, so continuing with the next packet can leave it
+    /// starting on a dependent P/B frame and losing video until a later key frame.
+    /// </summary>
+    internal static bool ShouldReplayHardwareSendFailure(int sendResult, bool hardware)
+    {
+        return hardware &&
+               sendResult < 0 &&
+               sendResult != -ffmpeg.EAGAIN &&
+               sendResult != ffmpeg.AVERROR_EOF;
+    }
+
     private static double TimestampToSeconds(long timestamp, AVRational timeBase)
     {
         return timestamp == ffmpeg.AV_NOPTS_VALUE ? double.NaN : timestamp * ffmpeg.av_q2d(timeBase);
@@ -970,11 +983,14 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
 
                     if (sendResult < 0 && !packetRejected && sendResult != ffmpeg.AVERROR_EOF)
                     {
-                        if (hardware)
+                        if (ShouldReplayHardwareSendFailure(sendResult, hardware))
                         {
-                            // The hardware decoder rejected the stream - retry it in software.
+                            // A fresh software decoder has none of the reference pictures that the
+                            // hardware decoder accumulated. Replay from a seek/key frame instead of
+                            // feeding it the packet after the one that failed.
                             FallBackToSoftware(ref codec, stream, sendResult, ref hardware);
                             serial = -1;
+                            Seek(Position);
                         }
 
                         continue;
