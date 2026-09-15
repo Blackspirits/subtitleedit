@@ -1061,6 +1061,69 @@ public sealed class LibMpvDynamicPlayer : IDisposable, IVideoPlayer
         SetOptionString("sub-ass-justify", justify == "auto" ? "no" : "yes");
     }
 
+    /// <summary>
+    /// Whether this player instance is the app's main editing preview (the docked window,
+    /// fullscreen, or the undocked window - opted in explicitly by
+    /// <see cref="Features.Main.Layout.InitVideoPlayer"/> and <see cref="Features.Main.MainViewModel"/>
+    /// right after construction) as opposed to a dialog's own throwaway preview (burn-in,
+    /// transparent subtitles, text-to-speech, binary/image edit, cut video, ...). Gates
+    /// <see cref="ApplyLetterboxRibbon"/>: those dialogs' previews showing bars that will not be
+    /// in their actual output (an encoded file, an image-based export, ...) would be actively
+    /// misleading, not just off-topic (#14872 review). False (off) by default, so a player has to
+    /// be opted in rather than opted out.
+    /// </summary>
+    public bool IsMainPreviewPlayer { get; set; }
+
+    private string _lastAppliedLetterboxFilter = string.Empty;
+
+    /// <summary>
+    /// Draws the Letterboxing ribbon's virtual black bars (top/bottom, #14845) into the decoded
+    /// frame via mpv's own "vf" filter chain, for the main preview player only (see
+    /// <see cref="IsMainPreviewPlayer"/>). mpv runs "vf" filters before its subtitle compositing
+    /// stage unless "sub" is explicitly inserted into the chain (it isn't here), so the preview
+    /// subtitle - burned in afterwards by libass via sub-add - renders on top of the bars
+    /// automatically, with no change to its margins or position. The filter string itself is
+    /// built by <see cref="LetterboxFilterBuilder"/>, which is unit-tested directly.
+    ///
+    /// Called on every subtitle refresh (every text edit, including during playback), not only on
+    /// load, so a slider drag in the Letterboxing dialog shows up live. Skips the mpv call when
+    /// the filter string has not actually changed since the last call: mpv treats an unchanged
+    /// option value as a no-op, but writing "vf" at all reinitializes the filter chain even when
+    /// the value is identical, which is unnecessary filter-graph churn on every keystroke while
+    /// playing.
+    /// </summary>
+    public void ApplyLetterboxRibbon()
+    {
+        if (!IsMainPreviewPlayer)
+        {
+            return;
+        }
+
+        var (top, bottom) = LetterboxFilterBuilder.BuildLabelledEntries(Se.Settings.Video.Letterbox);
+        var state = $"{top}\n{bottom}";
+        if (state == _lastAppliedLetterboxFilter)
+        {
+            return;
+        }
+
+        // Never assign or clear mpv's complete vf option: it can contain filters configured by
+        // the user or another feature. Manage only Subtitle Edit's own labelled letterbox entries.
+        DoMpvCommand("vf", "remove", "@se-letterbox-top");
+        DoMpvCommand("vf", "remove", "@se-letterbox-bottom");
+
+        if (top != null)
+        {
+            DoMpvCommand("vf", "add", top);
+        }
+
+        if (bottom != null)
+        {
+            DoMpvCommand("vf", "add", bottom);
+        }
+
+        _lastAppliedLetterboxFilter = state;
+    }
+
     public int SetOptionString(string name, string value)
     {
         if (_mpvSetOptionString == null || _mpv == IntPtr.Zero)
@@ -1910,6 +1973,7 @@ public sealed class LibMpvDynamicPlayer : IDisposable, IVideoPlayer
 
         ApplySubtitleMarginArea();
         ApplySubtitleJustify();
+        ApplyLetterboxRibbon();
 
         _fileName = path;
 
