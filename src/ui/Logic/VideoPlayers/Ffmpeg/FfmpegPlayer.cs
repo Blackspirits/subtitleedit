@@ -304,6 +304,45 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         return duration > 0 ? Math.Min(value, duration) : value;
     }
 
+    /// <summary>
+    /// State visible after a native seek failure. Only the request that actually failed may roll
+    /// back to the committed pipeline serial/position; a newer request that arrived while
+    /// av_seek_frame was blocked must remain pending.
+    /// </summary>
+    internal static (int RequestedSerial, double RequestedTarget) FailedSeekState(
+        int failedSerial,
+        int currentSerial,
+        int requestedSerial,
+        double requestedTarget,
+        double currentPosition)
+    {
+        return requestedSerial == failedSerial
+            ? (currentSerial, currentPosition)
+            : (requestedSerial, requestedTarget);
+    }
+
+    internal static bool ShouldAutoRewindOnPlay(
+        bool hasOutstandingSeek,
+        bool endReached,
+        double duration,
+        double position)
+    {
+        return !hasOutstandingSeek &&
+               (endReached || (duration > 0 && position >= duration - 0.01));
+    }
+
+    internal static bool ShouldReachAudioOnlyEnd(
+        bool playing,
+        bool hasOutstandingSeek,
+        double duration,
+        double position)
+    {
+        return playing &&
+               !hasOutstandingSeek &&
+               duration > 0 &&
+               position >= duration;
+    }
+
     public double Duration => _session?.Duration ?? 0;
 
     public int VolumeMaximum => 100;
@@ -652,12 +691,12 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 return;
             }
 
-            if (_endReached || (Duration > 0 && Position >= Duration - 0.01))
+            var hasOutstandingSeek = HasOutstandingSeek();
+            if (ShouldAutoRewindOnPlay(hasOutstandingSeek, _endReached, Duration, Position))
             {
                 Seek(0);
             }
 
-            _endReached = false;
             _playing = true;
             _wallClockBase = _pausedPosition;
             _wallClock.Restart();
@@ -709,10 +748,11 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 _requestedSerial++;
                 _requestedTarget = seconds;
                 _seekPending = true;
-                _pausedPosition = seconds;
             }
 
-            _endReached = false;
+            // Keep the committed playhead/end state unchanged until libavformat accepts the seek.
+            // Position reports _requestedTarget while the request is outstanding, so optimistic
+            // mutation here is unnecessary and would corrupt state if av_seek_frame fails.
             _demuxWake.Set();
         }
 
@@ -772,6 +812,14 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             return _wallClockBase + _wallClock.Elapsed.TotalSeconds * _speed;
         }
 
+        private bool HasOutstandingSeek()
+        {
+            lock (_seekLock)
+            {
+                return _requestedSerial != _currentSerial;
+            }
+        }
+
         /// <summary>True when a seek newer than the given serial has been requested (performed or not).</summary>
         private bool SeekRequestedSince(int serial)
         {
@@ -792,8 +840,11 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 {
                     if (TryTakeSeek(out var target, out var serial))
                     {
-                        PerformSeek(target, serial);
-                        eof = false;
+                        if (PerformSeek(target, serial))
+                        {
+                            eof = false;
+                        }
+
                         continue;
                     }
 
@@ -867,13 +918,15 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             }
         }
 
-        private void PerformSeek(double target, int serial)
+        private bool PerformSeek(double target, int serial)
         {
             var timestamp = (long)((target + _startTimeSeconds) * ffmpeg.AV_TIME_BASE);
             var result = ffmpeg.av_seek_frame(_format, -1, timestamp, ffmpeg.AVSEEK_FLAG_BACKWARD);
             if (result < 0)
             {
-                System.Diagnostics.Debug.WriteLine($"ffmpeg seek failed: {FfmpegLibraries.ErrorText(result)}");
+                Se.LogError($"ffmpeg player: seek to {target:0.###} s failed ({FfmpegLibraries.ErrorText(result)})");
+                RollBackFailedSeek(serial);
+                return false;
             }
 
             lock (_seekLock)
@@ -893,10 +946,34 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 }
             }
 
+            _endReached = false;
             _videoPackets.Flush(serial, target);
             _audioPackets.Flush(serial, target);
             _videoFrames.Flush();
             _audioSink.Reset();
+            _presentWake.Set();
+            return true;
+        }
+
+        private void RollBackFailedSeek(int serial)
+        {
+            // Seek no longer mutates the committed paused position, so this remains the actual
+            // position when paused. While playing, Clock() follows the still-current pipeline.
+            var currentPosition = _playing ? Clock() : _pausedPosition;
+
+            lock (_seekLock)
+            {
+                var state = FailedSeekState(
+                    serial,
+                    _currentSerial,
+                    _requestedSerial,
+                    _requestedTarget,
+                    currentPosition);
+
+                _requestedSerial = state.RequestedSerial;
+                _requestedTarget = state.RequestedTarget;
+            }
+
             _presentWake.Set();
         }
 
@@ -1655,6 +1732,15 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                             continue;
                         }
 
+                        if (SeekRequestedSince(frame.Serial))
+                        {
+                            // Keep the old EOS marker until the seek commits or fails. Without
+                            // this guard a video-only stream can ReachEnd while av_seek_frame is
+                            // still blocked and lose a Play issued for the requested destination.
+                            _presentWake.WaitOne(20);
+                            continue;
+                        }
+
                         if (_hasAudio)
                         {
                             // Video ended first; let the audio play out before stopping. The wake
@@ -1765,7 +1851,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
 
         private void PresentAudioOnlyTick()
         {
-            if (_playing && Duration > 0 && Clock() >= Duration)
+            if (ShouldReachAudioOnlyEnd(_playing, HasOutstandingSeek(), Duration, Clock()))
             {
                 ReachEnd();
             }
