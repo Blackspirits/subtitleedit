@@ -156,22 +156,19 @@ public sealed class VideoFrameQueue
         }
     }
 
-    /// <summary>Drops all queued frames (back to the pool).</summary>
+    /// <summary>
+    /// Drops all queued frames after a seek. Queued frames are disposed rather than returned to
+    /// the pool: the presenter may still hold a reference obtained from Peek/PeekSecond before
+    /// this flush. Reusing such an object immediately would let the decoder overwrite its serial,
+    /// timestamp and pixel buffer while the presenter is still reading the stale reference.
+    /// </summary>
     public void Flush()
     {
         lock (_lock)
         {
             while (_frames.Count > 0)
             {
-                var frame = _frames.Dequeue();
-                if (frame.Data != System.IntPtr.Zero && frame.Width == _width && frame.Height == _height)
-                {
-                    _pool.Push(frame);
-                }
-                else
-                {
-                    frame.Dispose();
-                }
+                _frames.Dequeue().Dispose();
             }
 
             Monitor.PulseAll(_lock);
