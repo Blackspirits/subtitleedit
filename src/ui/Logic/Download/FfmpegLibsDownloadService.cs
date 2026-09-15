@@ -1,4 +1,5 @@
 using Nikse.SubtitleEdit.Logic.VideoPlayers.Ffmpeg;
+using Nikse.SubtitleEdit.UiLogic;
 using System;
 using System.IO;
 using System.Net.Http;
@@ -21,12 +22,44 @@ public interface IFfmpegLibsDownloadService
 /// </summary>
 public class FfmpegLibsDownloadService(HttpClient httpClient) : IFfmpegLibsDownloadService
 {
-    private static readonly string WindowsX64Url =
-        $"https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n{FfmpegLibraries.MajorVersion}-latest-win64-lgpl-shared-{FfmpegLibraries.MajorVersion}.zip";
+    internal const string WindowsX64ReleaseTag = "autobuild-2026-09-15-13-18";
+    internal const string WindowsX64AssetName = "ffmpeg-n9.0.1-30-g9258bacca5-win64-lgpl-shared-9.0.zip";
+    internal const string WindowsX64Sha256 = "04d256aa477122949304a717bf61d8eec78e255c2c7c9be17fab1677227cb548";
+    internal const string WindowsX64Url =
+        "https://github.com/BtbN/FFmpeg-Builds/releases/download/" + WindowsX64ReleaseTag + "/" + WindowsX64AssetName;
 
     public async Task DownloadFfmpegLibs(string destinationFileName, IProgress<float>? progress, CancellationToken cancellationToken)
     {
         await DownloadHelper.DownloadFileAsync(httpClient, GetUrl(), destinationFileName, progress, cancellationToken);
+        await VerifySha256Async(destinationFileName, WindowsX64Sha256, cancellationToken);
+    }
+
+    internal static async Task VerifySha256Async(string filePath, string expectedSha256, CancellationToken cancellationToken)
+    {
+        var actual = await Sha256Util.ComputeSha256Async(filePath, cancellationToken);
+        if (string.Equals(actual, expectedSha256, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        TryDeleteFile(filePath);
+        throw new InvalidOperationException(
+            $"Downloaded FFmpeg library archive failed SHA-256 verification — expected {expectedSha256}, got {actual ?? "<missing>"}. The file has been removed.");
+    }
+
+    private static void TryDeleteFile(string filePath)
+    {
+        try
+        {
+            if (File.Exists(filePath))
+            {
+                File.Delete(filePath);
+            }
+        }
+        catch
+        {
+            // Best effort: never treat a failed cleanup as successful verification.
+        }
     }
 
     private static string GetUrl()
