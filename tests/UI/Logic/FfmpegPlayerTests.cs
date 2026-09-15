@@ -248,6 +248,22 @@ public class FfmpegPlayerTests
     }
 
     [Fact]
+    public void FailedStartupCleanupCannotClearNewerGenerationState()
+    {
+        using var player = new FfmpegPlayer();
+
+        player.CloseFile(); // generation 0 -> 1
+        Assert.True(player.TrySetDecoderNameFromSession(1, "current-hardware"));
+        Assert.Contains("current-hardware", player.Name);
+
+        Assert.False(player.TryClearOwnerMediaStateForGeneration(0));
+        Assert.Contains("current-hardware", player.Name);
+
+        Assert.True(player.TryClearOwnerMediaStateForGeneration(1));
+        Assert.Equal("ffmpeg", player.Name);
+    }
+
+    [Fact]
     public void StaleSessionFrameIsReturnedInsteadOfPublishedAfterClose()
     {
         using var player = new FfmpegPlayer();
