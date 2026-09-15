@@ -6,6 +6,14 @@ using System.Threading;
 
 namespace Nikse.SubtitleEdit.Logic.VideoPlayers.Ffmpeg.Audio;
 
+internal static class AudioQueueStartFence
+{
+    internal static bool Failed(int result)
+    {
+        return result != 0;
+    }
+}
+
 /// <summary>
 /// macOS audio output through Core Audio's AudioQueue API (AudioToolbox.framework). It is part
 /// of every macOS, needs no extra libraries and, like waveOut on Windows, hands out a ring of
@@ -104,6 +112,7 @@ public sealed unsafe partial class AudioQueueAudioSink : IAudioSink
     private int _generation;
     private int _serial;
     private bool _resetting;
+    private bool _startFailed;
     private volatile bool _disposed;
     private volatile bool _paused;
     private bool _started;
@@ -162,6 +171,7 @@ public sealed unsafe partial class AudioQueueAudioSink : IAudioSink
             _started = false;
             _serial = 0;
             _resetting = false;
+            _startFailed = false;
             _paused = false;
             _sampleBase = 0;
             _lastSampleTime = 0;
@@ -253,7 +263,7 @@ public sealed unsafe partial class AudioQueueAudioSink : IAudioSink
             var queued = false;
             lock (_lock)
             {
-                if (_disposed || _queue == IntPtr.Zero || _resetting || generation != _generation || serial != _serial)
+                if (_disposed || _queue == IntPtr.Zero || _resetting || _startFailed || generation != _generation || serial != _serial)
                 {
                     return false;
                 }
@@ -285,14 +295,20 @@ public sealed unsafe partial class AudioQueueAudioSink : IAudioSink
                     _nextBuffer = (_nextBuffer + 1) % BufferCount;
                     offset += count;
                     queued = true;
-                    StartIfQueuedCore();
+                    if (!StartIfQueuedCore())
+                    {
+                        return false;
+                    }
                 }
                 else
                 {
                     // A queue that has never been started hands nothing back, so start it first
                     // if playback is allowed. Copy + enqueue stay in this same critical section:
                     // Reset cannot recycle a buffer between those two operations.
-                    StartIfQueuedCore();
+                    if (!StartIfQueuedCore())
+                    {
+                        return false;
+                    }
                 }
             }
 
@@ -360,6 +376,7 @@ public sealed unsafe partial class AudioQueueAudioSink : IAudioSink
             _nextBuffer = 0;
             _bytesWritten = 0;
             _sampleBase = CurrentSampleTime();
+            _startFailed = false;
             Volatile.Write(ref _serial, AudioSinkResetFence.SerialAfterReset(serial, succeeded: true));
             _resetting = false;
             _doneEvent.Set();
@@ -385,7 +402,11 @@ public sealed unsafe partial class AudioQueueAudioSink : IAudioSink
             _paused = false;
             if (_queue != IntPtr.Zero && _started)
             {
-                AudioQueueStart(_queue, IntPtr.Zero);
+                var result = AudioQueueStart(_queue, IntPtr.Zero);
+                if (AudioQueueStartFence.Failed(result))
+                {
+                    FailStartCore(result);
+                }
             }
             else
             {
@@ -400,12 +421,42 @@ public sealed unsafe partial class AudioQueueAudioSink : IAudioSink
     /// Starts the queue once real audio is queued and playback is not paused; starting an empty
     /// queue just plays silence. Called under <see cref="_lock"/>.
     /// </summary>
-    private void StartIfQueuedCore()
+    private bool StartIfQueuedCore()
     {
+        if (_startFailed)
+        {
+            return false;
+        }
+
         if (_queue != IntPtr.Zero && !_started && !_paused && _inFlight > 0)
         {
-            _started = AudioQueueStart(_queue, IntPtr.Zero) == 0;
+            var result = AudioQueueStart(_queue, IntPtr.Zero);
+            if (AudioQueueStartFence.Failed(result))
+            {
+                FailStartCore(result);
+                return false;
+            }
+
+            _started = true;
         }
+
+        return true;
+    }
+
+    /// <summary>Called under _lock after Core Audio refused to start/resume the queue.</summary>
+    private void FailStartCore(int result)
+    {
+        if (_startFailed)
+        {
+            return;
+        }
+
+        _startFailed = true;
+        _started = false;
+        Interlocked.Increment(ref _generation);
+        Volatile.Write(ref _serial, AudioSinkResetFence.RejectedSerial);
+        Se.LogError($"ffmpeg player: AudioQueueStart failed with error {result}; audio writes remain fenced");
+        _doneEvent.Set();
     }
 
     /// <summary>Tears the queue down. Not called under <see cref="_lock"/>: disposing may run callbacks.</summary>

@@ -183,6 +183,14 @@ public class FfmpegPlayerTests
     }
 
     [Fact]
+    public void AudioQueueStartFence_FailsClosedOnAnyCoreAudioStartError()
+    {
+        Assert.False(AudioQueueStartFence.Failed(0));
+        Assert.True(AudioQueueStartFence.Failed(-1));
+        Assert.True(AudioQueueStartFence.Failed(1234));
+    }
+
+    [Fact]
     public void ExtractLibraries_TakesOnlyBinDlls_Flattened()
     {
         var folder = Path.Combine(Path.GetTempPath(), "se-ffmpeg-libs-" + Guid.NewGuid().ToString("N"));
