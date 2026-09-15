@@ -244,6 +244,15 @@ public class FfmpegPlayerTests
         Assert.Null(FfmpegPlayer.SeekTarget(value, 60));
     }
 
+    [Fact]
+    public void ShouldRetryDecoderOpenInSoftware_OnlyAfterAttachedHardwareFailure()
+    {
+        Assert.True(FfmpegPlayer.ShouldRetryDecoderOpenInSoftware(-1234, hardwareRequested: true, hardwareAttached: true));
+        Assert.False(FfmpegPlayer.ShouldRetryDecoderOpenInSoftware(-1234, hardwareRequested: false, hardwareAttached: true));
+        Assert.False(FfmpegPlayer.ShouldRetryDecoderOpenInSoftware(-1234, hardwareRequested: true, hardwareAttached: false));
+        Assert.False(FfmpegPlayer.ShouldRetryDecoderOpenInSoftware(0, hardwareRequested: true, hardwareAttached: true));
+    }
+
     [Theory]
     [InlineData(AVSampleFormat.AV_SAMPLE_FMT_U8, false)]
     [InlineData(AVSampleFormat.AV_SAMPLE_FMT_S16, false)]
