@@ -321,6 +321,32 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             : (requestedSerial, requestedTarget);
     }
 
+    internal static int FailedSeekAudioStreamState(int failedSerial, int requestedSerial, int requestedAudioStreamIndex)
+    {
+        return requestedSerial == failedSerial ? -1 : requestedAudioStreamIndex;
+    }
+
+    internal static int NextAudioStreamIndex(IReadOnlyList<int> streamIndexes, int committedAudioStreamIndex, int requestedAudioStreamIndex)
+    {
+        if (streamIndexes.Count == 0)
+        {
+            return -1;
+        }
+
+        var selected = requestedAudioStreamIndex >= 0 ? requestedAudioStreamIndex : committedAudioStreamIndex;
+        var current = -1;
+        for (var i = 0; i < streamIndexes.Count; i++)
+        {
+            if (streamIndexes[i] == selected)
+            {
+                current = i;
+                break;
+            }
+        }
+
+        return streamIndexes[(current + 1) % streamIndexes.Count];
+    }
+
     internal static bool ShouldAutoRewindOnPlay(
         bool hasOutstandingSeek,
         bool endReached,
@@ -465,7 +491,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         private readonly string _fileName;
         private AVFormatContext* _format;
         private readonly int _videoStreamIndex = -1;
-        private int _audioStreamIndex = -1;
+        private volatile int _audioStreamIndex = -1;
         private readonly List<int> _audioStreamIndexes = new();
         private readonly double _startTimeSeconds;
 
@@ -490,6 +516,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         private readonly Lock _seekLock = new();
         private int _requestedSerial;
         private double _requestedTarget = -1;
+        private int _requestedAudioStreamIndex = -1;
         private bool _seekPending;
         private int _currentSerial; // serial the pipeline currently runs under
 
@@ -776,10 +803,21 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 return null;
             }
 
-            var current = _audioStreamIndexes.IndexOf(_audioStreamIndex);
-            var next = _audioStreamIndexes[(current + 1) % _audioStreamIndexes.Count];
-            _audioStreamIndex = next;
-            Seek(Position); // flushes the queues; the audio thread reopens on the first packet of the new stream
+            var position = Position;
+            int next;
+            lock (_seekLock)
+            {
+                next = NextAudioStreamIndex(_audioStreamIndexes, _audioStreamIndex, _requestedAudioStreamIndex);
+                _requestedSerial++;
+                _requestedTarget = position;
+                _requestedAudioStreamIndex = next;
+                _seekPending = true;
+            }
+
+            // Keep routing the committed track until av_seek_frame succeeds. Otherwise packets
+            // from the requested track can enter the old serial, and a failed seek leaves the
+            // decoder switched even though the playback pipeline never moved.
+            _demuxWake.Set();
 
             var stream = _format->streams[next];
             return new AudioTrackInfo
@@ -838,9 +876,9 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             {
                 while (!_closing)
                 {
-                    if (TryTakeSeek(out var target, out var serial))
+                    if (TryTakeSeek(out var target, out var serial, out var audioStreamIndex))
                     {
-                        if (PerformSeek(target, serial))
+                        if (PerformSeek(target, serial, audioStreamIndex))
                         {
                             eof = false;
                         }
@@ -900,7 +938,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             }
         }
 
-        private bool TryTakeSeek(out double target, out int serial)
+        private bool TryTakeSeek(out double target, out int serial, out int audioStreamIndex)
         {
             lock (_seekLock)
             {
@@ -908,17 +946,19 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 {
                     target = 0;
                     serial = 0;
+                    audioStreamIndex = -1;
                     return false;
                 }
 
                 _seekPending = false;
                 target = _requestedTarget;
                 serial = _requestedSerial;
+                audioStreamIndex = _requestedAudioStreamIndex;
                 return true;
             }
         }
 
-        private bool PerformSeek(double target, int serial)
+        private bool PerformSeek(double target, int serial, int audioStreamIndex)
         {
             var timestamp = (long)((target + _startTimeSeconds) * ffmpeg.AV_TIME_BASE);
             var result = ffmpeg.av_seek_frame(_format, -1, timestamp, ffmpeg.AVSEEK_FLAG_BACKWARD);
@@ -932,6 +972,16 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             lock (_seekLock)
             {
                 _currentSerial = serial;
+                if (audioStreamIndex >= 0)
+                {
+                    _audioStreamIndex = audioStreamIndex;
+                }
+
+                if (_requestedSerial == serial)
+                {
+                    _requestedAudioStreamIndex = -1;
+                }
+
                 _audioAnchorPts = double.NaN;
                 _audioAnchorSerial = -1;
                 _audioSpeed = _speed;
@@ -963,13 +1013,18 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
 
             lock (_seekLock)
             {
+                var requestedSerial = _requestedSerial;
                 var state = FailedSeekState(
                     serial,
                     _currentSerial,
-                    _requestedSerial,
+                    requestedSerial,
                     _requestedTarget,
                     currentPosition);
 
+                _requestedAudioStreamIndex = FailedSeekAudioStreamState(
+                    serial,
+                    requestedSerial,
+                    _requestedAudioStreamIndex);
                 _requestedSerial = state.RequestedSerial;
                 _requestedTarget = state.RequestedTarget;
             }
