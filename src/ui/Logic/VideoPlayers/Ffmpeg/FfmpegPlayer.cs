@@ -200,6 +200,23 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             {
                 // CloseFile took and disposed the session while it was being started.
             }
+            catch (Exception exception)
+            {
+                Se.LogError(exception, $"ffmpeg player failed to start: {fileName}");
+
+                // Session.Start is transactional, but remove this failed Session from the owner
+                // as well. If CloseFile/replacement already took it, that path owns disposal.
+                if (Interlocked.CompareExchange(ref _session, null, session) == session)
+                {
+                    session.Dispose();
+                    TryClearOwnerMediaStateForGeneration(generation);
+                }
+
+                if (generation == Volatile.Read(ref _loadGeneration))
+                {
+                    _fileName = string.Empty;
+                }
+            }
         });
     }
 
@@ -701,17 +718,28 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                     throw new ObjectDisposedException(nameof(Session));
                 }
 
-                StartWorker(ref _demuxThread, DemuxLoop, "ffmpeg demux");
-                StartWorker(ref _presentThread, PresentLoop, "ffmpeg present");
-
-                if (_hasVideo)
+                try
                 {
-                    StartWorker(ref _videoThread, VideoLoop, "ffmpeg video");
+                    StartWorker(ref _demuxThread, DemuxLoop, "ffmpeg demux");
+                    StartWorker(ref _presentThread, PresentLoop, "ffmpeg present");
+
+                    if (_hasVideo)
+                    {
+                        StartWorker(ref _videoThread, VideoLoop, "ffmpeg video");
+                    }
+
+                    if (_hasAudio)
+                    {
+                        StartWorker(ref _audioThread, AudioLoop, "ffmpeg audio");
+                    }
                 }
-
-                if (_hasAudio)
+                catch
                 {
-                    StartWorker(ref _audioThread, AudioLoop, "ffmpeg audio");
+                    // Worker startup is all-or-nothing. If a later Thread.Start fails after an
+                    // earlier worker is already running, close/reclaim that partial Session before
+                    // propagating the startup failure to the owner.
+                    DisposeLocked();
+                    throw;
                 }
             }
         }
@@ -1952,59 +1980,65 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         {
             lock (_lifecycleLock)
             {
-                if (_resourcesDisposed)
-                {
-                    return;
-                }
+                DisposeLocked();
+            }
+        }
 
-                // A previous teardown attempt may have timed out and retained the
-                // worker-visible resources. Keep the session closed; a later Dispose may retry
-                // the joins, and the last worker to exit also schedules one-shot reclamation.
-                if (!_closing)
-                {
-                    _closing = true;
-                    _playing = false;
-                    _videoPackets.Close();
-                    _audioPackets.Close();
-                    _videoFrames.Close();
-                    _demuxWake.Set();
-                    _presentWake.Set();
+        /// <summary>Teardown with <see cref="_lifecycleLock"/> already held.</summary>
+        private void DisposeLocked()
+        {
+            if (_resourcesDisposed)
+            {
+                return;
+            }
 
-                    // The constructor disposes a half-built session (stream info failed, no usable
-                    // stream) before the sink exists, so the sink is null on those paths.
-                    var sinkToReset = _audioSink;
-                    if (sinkToReset != null)
+            // A previous teardown attempt may have timed out and retained the
+            // worker-visible resources. Keep the session closed; a later Dispose may retry
+            // the joins, and the last worker to exit also schedules one-shot reclamation.
+            if (!_closing)
+            {
+                _closing = true;
+                _playing = false;
+                _videoPackets.Close();
+                _audioPackets.Close();
+                _videoFrames.Close();
+                _demuxWake.Set();
+                _presentWake.Set();
+
+                // The constructor disposes a half-built session (stream info failed, no usable
+                // stream) before the sink exists, so the sink is null on those paths.
+                var sinkToReset = _audioSink;
+                if (sinkToReset != null)
+                {
+                    try
                     {
-                        try
-                        {
-                            sinkToReset.Reset();
-                        }
-                        catch
-                        {
-                            // sink may not have been opened
-                        }
+                        sinkToReset.Reset();
+                    }
+                    catch
+                    {
+                        // sink may not have been opened
                     }
                 }
-
-                var stopped = JoinThread(_demuxThread);
-                stopped &= JoinThread(_videoThread);
-                stopped &= JoinThread(_audioThread);
-                stopped &= JoinThread(_presentThread);
-
-                if (!stopped)
-                {
-                    // A live worker may still touch the format context, audio sink or wake events.
-                    // Retain the whole worker-visible lifetime boundary. If the workers eventually
-                    // exit, the last one schedules a one-shot cleanup; a permanently stuck worker
-                    // remains a controlled leak rather than becoming a use-after-free.
-                    Volatile.Write(ref _cleanupDeferredToWorkerExit, true);
-                    Se.LogError($"ffmpeg player: retaining session resources for '{_fileName}' because a thread did not stop");
-                    ScheduleDeferredCleanupIfReady();
-                    return;
-                }
-
-                ReleaseResources();
             }
+
+            var stopped = JoinThread(_demuxThread);
+            stopped &= JoinThread(_videoThread);
+            stopped &= JoinThread(_audioThread);
+            stopped &= JoinThread(_presentThread);
+
+            if (!stopped)
+            {
+                // A live worker may still touch the format context, audio sink or wake events.
+                // Retain the whole worker-visible lifetime boundary. If the workers eventually
+                // exit, the last one schedules a one-shot cleanup; a permanently stuck worker
+                // remains a controlled leak rather than becoming a use-after-free.
+                Volatile.Write(ref _cleanupDeferredToWorkerExit, true);
+                Se.LogError($"ffmpeg player: retaining session resources for '{_fileName}' because a thread did not stop");
+                ScheduleDeferredCleanupIfReady();
+                return;
+            }
+
+            ReleaseResources();
         }
 
         private void ReleaseResources()
