@@ -217,6 +217,33 @@ public class FfmpegPlayerTests
     }
 
     [Theory]
+    [InlineData(60.0, 42.5, 60.0)]
+    [InlineData(0.0, 42.5, 42.5)]
+    [InlineData(double.NaN, 42.5, 42.5)]
+    [InlineData(0.0, double.NaN, 0.0)]
+    [InlineData(0.0, -1.0, 0.0)]
+    public void EndPosition_KnownDurationOrObservedFallback(double duration, double observed, double expected)
+    {
+        Assert.Equal(expected, FfmpegPlayer.EndPosition(duration, observed));
+    }
+
+    [Theory]
+    [InlineData(3, 3, 12.0, 11.994, false)]
+    [InlineData(3, 3, 12.0, 11.995, true)]
+    [InlineData(3, 3, 12.0, 12.0, true)]
+    [InlineData(2, 3, 12.0, 99.0, false)]
+    [InlineData(3, 3, double.NaN, 0.0, true)]
+    public void AudioDrainComplete_RequiresCurrentEofAndPlayedTail(
+        int eofSerial,
+        int currentSerial,
+        double audioEnd,
+        double clock,
+        bool expected)
+    {
+        Assert.Equal(expected, FfmpegPlayer.AudioDrainComplete(eofSerial, currentSerial, audioEnd, clock));
+    }
+
+    [Theory]
     [InlineData(12.5, 60.0, 12.5)]
     [InlineData(75.0, 60.0, 60.0)] // past the end: clamped to the duration
     [InlineData(0.0, 60.0, 0.0)]
