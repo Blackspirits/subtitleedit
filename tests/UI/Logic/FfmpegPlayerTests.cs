@@ -244,6 +244,16 @@ public class FfmpegPlayerTests
         Assert.Null(FfmpegPlayer.SeekTarget(value, 60));
     }
 
+    [Fact]
+    public void ShouldResendPacket_RequiresRejectedInputDecoderProgressAndCurrentSerial()
+    {
+        Assert.True(FfmpegPlayer.ShouldResendPacket(-ffmpeg.EAGAIN, receivedOutput: true, interrupted: false));
+        Assert.False(FfmpegPlayer.ShouldResendPacket(-ffmpeg.EAGAIN, receivedOutput: false, interrupted: false));
+        Assert.False(FfmpegPlayer.ShouldResendPacket(-ffmpeg.EAGAIN, receivedOutput: true, interrupted: true));
+        Assert.False(FfmpegPlayer.ShouldResendPacket(0, receivedOutput: true, interrupted: false));
+        Assert.False(FfmpegPlayer.ShouldResendPacket(ffmpeg.AVERROR_EOF, receivedOutput: true, interrupted: false));
+    }
+
     [Theory]
     [InlineData(AVSampleFormat.AV_SAMPLE_FMT_U8, false)]
     [InlineData(AVSampleFormat.AV_SAMPLE_FMT_S16, false)]
