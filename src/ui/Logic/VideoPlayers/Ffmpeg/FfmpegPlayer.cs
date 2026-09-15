@@ -205,24 +205,33 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
 
     public void CloseFile()
     {
-        Interlocked.Increment(ref _loadGeneration);
+        var generation = Interlocked.Increment(ref _loadGeneration);
         var session = Interlocked.Exchange(ref _session, null);
         _fileName = string.Empty;
         session?.Dispose();
 
+        // Dispose can wait on stubborn workers. If another load became current meanwhile, this
+        // older close must not clear the newer session's decoder badge or presented frame.
+        TryClearOwnerMediaStateForGeneration(generation);
+    }
+
+    internal bool TryClearOwnerMediaStateForGeneration(int loadGeneration)
+    {
         lock (_currentFrameLock)
         {
-            // Any worker that survives the teardown timeout belongs to an older load generation
-            // and may no longer publish UI state after this point.
-            _decoderName = string.Empty;
+            if (loadGeneration != Volatile.Read(ref _loadGeneration))
+            {
+                return false;
+            }
 
-            // The frame belonged to the session's pool, which is gone now.
+            _decoderName = string.Empty;
             _currentFrame?.Dispose();
             _currentFrame = null;
+            Interlocked.Increment(ref _frameVersion);
         }
 
-        Interlocked.Increment(ref _frameVersion);
         FrameReady?.Invoke();
+        return true;
     }
 
     public void Play()
