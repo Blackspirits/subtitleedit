@@ -1,3 +1,4 @@
+using Nikse.SubtitleEdit.Logic.Config;
 using System;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
@@ -161,7 +162,10 @@ public sealed unsafe partial class WaveOutAudioSink : IAudioSink
     {
         lock (_lock)
         {
-            CloseCore();
+            if (!CloseCore())
+            {
+                throw new InvalidOperationException("Previous waveOut device could not be closed safely");
+            }
 
             var format = new WaveFormatEx
             {
@@ -412,20 +416,43 @@ public sealed unsafe partial class WaveOutAudioSink : IAudioSink
         }
     }
 
-    private void CloseCore()
+    /// <summary>
+    /// Releases native resources only after WinMM confirms it no longer owns any waveform
+    /// buffers. A failure keeps the complete device/buffer/event boundary alive so Dispose can
+    /// be retried instead of freeing memory that the driver may still reference.
+    /// Called under <see cref="_lock"/>.
+    /// </summary>
+    private bool CloseCore()
     {
         if (_device != IntPtr.Zero)
         {
-            waveOutReset(_device);
+            var resetResult = waveOutReset(_device);
+            if (resetResult != MmSysErrNoError)
+            {
+                Se.LogError($"ffmpeg player: waveOutReset failed during teardown with error {resetResult}; retaining WinMM resources");
+                return false;
+            }
+
             if (_headers != IntPtr.Zero)
             {
                 for (var i = 0; i < BufferCount; i++)
                 {
-                    waveOutUnprepareHeader(_device, (IntPtr)((WaveHdr*)_headers + i), (uint)sizeof(WaveHdr));
+                    var unprepareResult = waveOutUnprepareHeader(_device, (IntPtr)((WaveHdr*)_headers + i), (uint)sizeof(WaveHdr));
+                    if (unprepareResult != MmSysErrNoError)
+                    {
+                        Se.LogError($"ffmpeg player: waveOutUnprepareHeader failed during teardown with error {unprepareResult}; retaining WinMM resources");
+                        return false;
+                    }
                 }
             }
 
-            waveOutClose(_device);
+            var closeResult = waveOutClose(_device);
+            if (closeResult != MmSysErrNoError)
+            {
+                Se.LogError($"ffmpeg player: waveOutClose failed during teardown with error {closeResult}; retaining WinMM resources");
+                return false;
+            }
+
             _device = IntPtr.Zero;
         }
 
@@ -443,9 +470,16 @@ public sealed unsafe partial class WaveOutAudioSink : IAudioSink
 
         if (_doneEvent != IntPtr.Zero)
         {
-            CloseHandle(_doneEvent);
+            if (!CloseHandle(_doneEvent))
+            {
+                Se.LogError($"ffmpeg player: CloseHandle failed during waveOut teardown with error {Marshal.GetLastWin32Error()}; retaining event handle");
+                return false;
+            }
+
             _doneEvent = IntPtr.Zero;
         }
+
+        return true;
     }
 
     public void Dispose()
