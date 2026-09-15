@@ -405,6 +405,16 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             or AVSampleFormat.AV_SAMPLE_FMT_S64P;
     }
 
+    /// <summary>
+    /// ffplay only publishes end-of-stream after av_read_frame reports AVERROR_EOF or the
+    /// underlying AVIO context reports that reading ended. Demuxer-level errors such as
+    /// AVERROR_INVALIDDATA can be recoverable on the next read and must not truncate playback.
+    /// </summary>
+    internal static bool IsDemuxEndOfInput(int readResult, bool avioEnded)
+    {
+        return readResult == ffmpeg.AVERROR_EOF || avioEnded;
+    }
+
     private static double TimestampToSeconds(long timestamp, AVRational timeBase)
     {
         return timestamp == ffmpeg.AV_NOPTS_VALUE ? double.NaN : timestamp * ffmpeg.av_q2d(timeBase);
@@ -822,7 +832,16 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                             continue;
                         }
 
-                        // End of file - or a read error, which ffplay treats the same way.
+                        var avioEnded = _format->pb != null && ffmpeg.avio_feof(_format->pb) != 0;
+                        if (!IsDemuxEndOfInput(result, avioEnded))
+                        {
+                            // ffplay retries demuxer-level errors that are not real end-of-input.
+                            // Some demuxers advance past malformed data before returning an error,
+                            // so the next av_read_frame can recover and continue the file.
+                            _demuxWake.WaitOne(10);
+                            continue;
+                        }
+
                         eof = true;
                         _videoPackets.Push(null);
                         _audioPackets.Push(null);
