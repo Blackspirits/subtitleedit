@@ -10,7 +10,6 @@ using Nikse.SubtitleEdit.Logic.VideoPlayers.Ffmpeg;
 using System;
 using System.Globalization;
 using System.IO;
-using System.IO.Compression;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Timers;
@@ -129,35 +128,12 @@ public partial class DownloadFfmpegLibsViewModel : ObservableObject, IClosingCle
     }
 
     /// <summary>
-    /// Pulls the DLLs out of the build zip (<c>ffmpeg-…/bin/*.dll</c>) into a flat folder. Only the
-    /// libraries are taken: the zip also carries its own ffmpeg.exe, headers and import libs,
-    /// none of which the player needs.
+    /// Stages, validates and transactionally installs the DLLs from the reviewed FFmpeg build zip.
+    /// The active library folder is changed only after all required runtime libraries are present.
     /// </summary>
     internal static void ExtractLibraries(string zipFileName, string targetFolder, CancellationToken cancellationToken)
     {
-        Directory.CreateDirectory(targetFolder);
-        using var archive = ZipFile.OpenRead(zipFileName);
-        var count = 0;
-        foreach (var entry in archive.Entries)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var name = entry.FullName.Replace('\\', '/');
-            if (!name.Contains("/bin/", StringComparison.OrdinalIgnoreCase) ||
-                !name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ||
-                string.IsNullOrEmpty(entry.Name))
-            {
-                continue;
-            }
-
-            var target = Path.Combine(targetFolder, entry.Name);
-            entry.ExtractToFile(target, overwrite: true);
-            count++;
-        }
-
-        if (count == 0)
-        {
-            throw new InvalidOperationException("No FFmpeg libraries found in the downloaded archive");
-        }
+        FfmpegLibraryInstaller.Install(zipFileName, targetFolder, cancellationToken);
     }
 
     private void StartIndeterminateProgress()
