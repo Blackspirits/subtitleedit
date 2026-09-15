@@ -313,6 +313,11 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         return closing || ownerDisposed || loadGeneration != currentGeneration;
     }
 
+    internal static bool ShouldScheduleDeferredSessionCleanup(bool cleanupDeferred, int activeWorkers)
+    {
+        return cleanupDeferred && activeWorkers == 0;
+    }
+
     public double Duration => _session?.Duration ?? 0;
 
     public int VolumeMaximum => 100;
@@ -483,6 +488,9 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         private readonly int _ownerLoadGeneration;
         private volatile bool _closing;
         private bool _resourcesDisposed;
+        private int _activeWorkers;
+        private bool _cleanupDeferredToWorkerExit;
+        private int _deferredCleanupScheduled;
 
         private readonly AutoResetEvent _demuxWake = new(false);
         private readonly AutoResetEvent _presentWake = new(false);
@@ -684,23 +692,81 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                     throw new ObjectDisposedException(nameof(Session));
                 }
 
-                _demuxThread = new Thread(DemuxLoop) { IsBackground = true, Name = "ffmpeg demux" };
-                _presentThread = new Thread(PresentLoop) { IsBackground = true, Name = "ffmpeg present" };
-                _demuxThread.Start();
-                _presentThread.Start();
+                StartWorker(ref _demuxThread, DemuxLoop, "ffmpeg demux");
+                StartWorker(ref _presentThread, PresentLoop, "ffmpeg present");
 
                 if (_hasVideo)
                 {
-                    _videoThread = new Thread(VideoLoop) { IsBackground = true, Name = "ffmpeg video" };
-                    _videoThread.Start();
+                    StartWorker(ref _videoThread, VideoLoop, "ffmpeg video");
                 }
 
                 if (_hasAudio)
                 {
-                    _audioThread = new Thread(AudioLoop) { IsBackground = true, Name = "ffmpeg audio" };
-                    _audioThread.Start();
+                    StartWorker(ref _audioThread, AudioLoop, "ffmpeg audio");
                 }
             }
+        }
+
+        private void StartWorker(ref Thread? field, ThreadStart loop, string name)
+        {
+            var thread = new Thread(() =>
+            {
+                try
+                {
+                    loop();
+                }
+                finally
+                {
+                    WorkerExited();
+                }
+            })
+            {
+                IsBackground = true,
+                Name = name,
+            };
+
+            field = thread;
+            Interlocked.Increment(ref _activeWorkers);
+            try
+            {
+                thread.Start();
+            }
+            catch
+            {
+                field = null;
+                Interlocked.Decrement(ref _activeWorkers);
+                throw;
+            }
+        }
+
+        private void WorkerExited()
+        {
+            Interlocked.Decrement(ref _activeWorkers);
+            ScheduleDeferredCleanupIfReady();
+        }
+
+        private void ScheduleDeferredCleanupIfReady()
+        {
+            if (!ShouldScheduleDeferredSessionCleanup(
+                    Volatile.Read(ref _cleanupDeferredToWorkerExit),
+                    Volatile.Read(ref _activeWorkers)) ||
+                Interlocked.Exchange(ref _deferredCleanupScheduled, 1) != 0)
+            {
+                return;
+            }
+
+            _ = Task.Run(() =>
+            {
+                lock (_lifecycleLock)
+                {
+                    if (!_resourcesDisposed &&
+                        _closing &&
+                        Volatile.Read(ref _activeWorkers) == 0)
+                    {
+                        ReleaseResources();
+                    }
+                }
+            });
         }
 
         public void Play()
@@ -1882,9 +1948,9 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                     return;
                 }
 
-                // A previous teardown attempt may have timed out and deliberately leaked the
-                // worker-visible resources. In that case keep the session closed but allow a
-                // later Dispose call to retry the joins and finish cleanup if the workers exited.
+                // A previous teardown attempt may have timed out and retained the
+                // worker-visible resources. Keep the session closed; a later Dispose may retry
+                // the joins, and the last worker to exit also schedules one-shot reclamation.
                 if (!_closing)
                 {
                     _closing = true;
@@ -1919,30 +1985,38 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 if (!stopped)
                 {
                     // A live worker may still touch the format context, audio sink or wake events.
-                    // Leak the whole worker-visible lifetime boundary rather than freeing only
-                    // _format and leaving a different use-after-free behind.
-                    Se.LogError($"ffmpeg player: leaking session resources for '{_fileName}' because a thread did not stop");
+                    // Retain the whole worker-visible lifetime boundary. If the workers eventually
+                    // exit, the last one schedules a one-shot cleanup; a permanently stuck worker
+                    // remains a controlled leak rather than becoming a use-after-free.
+                    Volatile.Write(ref _cleanupDeferredToWorkerExit, true);
+                    Se.LogError($"ffmpeg player: retaining session resources for '{_fileName}' because a thread did not stop");
+                    ScheduleDeferredCleanupIfReady();
                     return;
                 }
 
-                _audioSink?.Dispose();
-                _demuxWake.Dispose();
-                _presentWake.Dispose();
-
-                if (_format != null)
-                {
-                    var format = _format;
-                    ffmpeg.avformat_close_input(&format);
-                    _format = null;
-                }
-
-                if (_selfHandle.IsAllocated)
-                {
-                    _selfHandle.Free();
-                }
-
-                _resourcesDisposed = true;
+                ReleaseResources();
             }
+        }
+
+        private void ReleaseResources()
+        {
+            _audioSink?.Dispose();
+            _demuxWake.Dispose();
+            _presentWake.Dispose();
+
+            if (_format != null)
+            {
+                var format = _format;
+                ffmpeg.avformat_close_input(&format);
+                _format = null;
+            }
+
+            if (_selfHandle.IsAllocated)
+            {
+                _selfHandle.Free();
+            }
+
+            _resourcesDisposed = true;
         }
 
         /// <summary>False when the thread is still running after the timeout.</summary>

@@ -271,6 +271,21 @@ public class FfmpegPlayerTests
     }
 
     [Theory]
+    [InlineData(false, 0, false)]
+    [InlineData(true, 2, false)]
+    [InlineData(true, 1, false)]
+    [InlineData(true, 0, true)]
+    public void ShouldScheduleDeferredSessionCleanup_RequiresDeferredLastWorkerExit(
+        bool cleanupDeferred,
+        int activeWorkers,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            FfmpegPlayer.ShouldScheduleDeferredSessionCleanup(cleanupDeferred, activeWorkers));
+    }
+
+    [Theory]
     [InlineData(12.5, 60.0, 12.5)]
     [InlineData(75.0, 60.0, 60.0)] // past the end: clamped to the duration
     [InlineData(0.0, 60.0, 0.0)]
