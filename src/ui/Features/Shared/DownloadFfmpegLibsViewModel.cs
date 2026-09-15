@@ -36,7 +36,8 @@ public partial class DownloadFfmpegLibsViewModel : ObservableObject, IClosingCle
     private readonly IFfmpegLibsDownloadService _downloadService;
     private Task? _downloadTask;
     private readonly Timer _timer;
-    private bool _done;
+    private volatile bool _done;
+    private int _cleanupStarted;
     private readonly CancellationTokenSource _cancellationTokenSource;
     private IndeterminateProgressHelper? _indeterminateProgressHelper;
     private readonly Lock _lockObj = new();
@@ -93,14 +94,7 @@ public partial class DownloadFfmpegLibsViewModel : ObservableObject, IClosingCle
                 }
                 finally
                 {
-                    try
-                    {
-                        File.Delete(_tempFileName);
-                    }
-                    catch
-                    {
-                        // temp file, best effort
-                    }
+                    TryDeleteTempFile(_tempFileName);
                 }
 
                 StopIndeterminateProgress();
@@ -138,6 +132,11 @@ public partial class DownloadFfmpegLibsViewModel : ObservableObject, IClosingCle
 
     private void StartIndeterminateProgress()
     {
+        if (_cancellationTokenSource.IsCancellationRequested)
+        {
+            return;
+        }
+
         _indeterminateProgressHelper?.Dispose();
         _indeterminateProgressHelper = new IndeterminateProgressHelper(
             value => ProgressValue = value,
@@ -159,14 +158,67 @@ public partial class DownloadFfmpegLibsViewModel : ObservableObject, IClosingCle
     [RelayCommand]
     private void CommandCancel()
     {
-        _cancellationTokenSource.Cancel();
-        _done = true;
+        CancelPendingWork();
         Close();
+    }
+
+    private void CancelPendingWork()
+    {
+        _done = true;
+        _cancellationTokenSource.Cancel();
+        StopIndeterminateProgress();
     }
 
     public void OnClosingCleanup()
     {
+        if (Interlocked.Exchange(ref _cleanupStarted, 1) != 0)
+        {
+            return;
+        }
+
+        // Closed can come from the Cancel button, Escape, the title-bar X, or normal success.
+        // Make the first three equivalent: stop all work before detaching the polling timer.
+        CancelPendingWork();
         _timer.StopAndDispose(OnTimerOnElapsed);
+        _ = DeleteTempFileWhenTaskCompletesAsync(_downloadTask, _tempFileName);
+    }
+
+    internal static async Task DeleteTempFileWhenTaskCompletesAsync(Task? downloadTask, string tempFileName)
+    {
+        if (downloadTask != null)
+        {
+            try
+            {
+                await downloadTask.ConfigureAwait(false);
+            }
+            catch
+            {
+                // Cancellation/download failure is already the reason cleanup is running.
+            }
+        }
+
+        TryDeleteTempFile(tempFileName);
+    }
+
+    private static void TryDeleteTempFile(string tempFileName)
+    {
+        if (string.IsNullOrWhiteSpace(tempFileName))
+        {
+            return;
+        }
+
+        try
+        {
+            if (File.Exists(tempFileName))
+            {
+                File.Delete(tempFileName);
+            }
+        }
+        catch
+        {
+            // Best effort. During unpacking the timer callback may still own the ZIP and its
+            // finally block will retry deletion once that operation observes cancellation.
+        }
     }
 
     public void StartDownload()
