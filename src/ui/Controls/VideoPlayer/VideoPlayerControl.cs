@@ -13,6 +13,7 @@ using Nikse.SubtitleEdit.Core.Common;
 using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.Config;
 using Nikse.SubtitleEdit.Logic.VideoPlayers;
+using Nikse.SubtitleEdit.Logic.VideoPlayers.Ffmpeg;
 using Nikse.SubtitleEdit.Logic.VideoPlayers.LibMpvDynamic;
 using Optris.Icons.Avalonia;
 using System;
@@ -966,16 +967,26 @@ namespace Nikse.SubtitleEdit.Controls.VideoPlayer
             _textBlockVideoFileName.MaxWidth = available > 20 ? available : 20;
         }
 
-        internal void Close()
+        private void StopCloseUiActivity()
         {
             _positionTimer?.Stop();
             StopAutoHideControls();
-            _videoPlayerInstance.CloseFile();
+        }
+
+        private void ResetClosedUiState()
+        {
             ProgressText = string.Empty;
             _videoFileName = string.Empty;
             _textBlockVideoFileName.Text = string.Empty;
             SetPositionDisplayOnly(0);
             Duration = 0;
+        }
+
+        internal void Close()
+        {
+            StopCloseUiActivity();
+            _videoPlayerInstance.CloseFile();
+            ResetClosedUiState();
         }
 
         /// <summary>
@@ -1004,17 +1015,46 @@ namespace Nikse.SubtitleEdit.Controls.VideoPlayer
         /// until restart (issue #13048).
         /// </para>
         /// <para>
-        /// Order matters: stop and unload first so the player is idle, then drop the content
-        /// (which destroys the embedded window), and only then destroy the core. mpv's
-        /// <c>mpv_terminate_destroy</c> blocks until every worker has exited - milliseconds when
-        /// idle, but many seconds if a load is stuck on a slow path - so it runs on a worker
-        /// thread rather than freezing the UI (same reasoning as issue #11176).
+        /// Order matters for native render hosts: stop/unload first, mark any GL teardown state,
+        /// then drop the content and destroy the core on a worker. FFmpeg is the exception during
+        /// definitive teardown: its <c>CloseFile</c> itself joins demux/decode/presenter workers
+        /// and can wait for the teardown timeout, while <c>Dispose</c> already performs that close.
+        /// A player can therefore opt to defer the final CloseFile to the background Dispose;
+        /// the normal reusable <see cref="Close"/> path remains synchronous.
         /// </para>
         /// </summary>
         internal void CloseAndDisposePlayer()
         {
+            if (IsDisposed)
+            {
+                return;
+            }
+
             IsDisposed = true;
-            Close();
+            var disposablePlayer = _videoPlayerInstance as IDisposable;
+
+            // FFmpeg CloseFile joins its demux/decode/presenter workers and can wait for the
+            // teardown timeout. This control is being discarded permanently, so let Dispose do
+            // that close on the worker below instead of blocking the UI before we even detach.
+            // The normal Close() path remains synchronous because that path reuses the player.
+            if (_videoPlayerInstance.DeferCloseFileToDispose && disposablePlayer != null)
+            {
+                StopCloseUiActivity();
+                ResetClosedUiState();
+            }
+            else
+            {
+                Close();
+            }
+
+            // FfmpegSoftwareControl normally owns disposal from its detach callback. Final
+            // VideoPlayerControl teardown already has a background Dispose owner below, so transfer
+            // ownership first; otherwise Content = null would schedule two concurrent disposes.
+            if (PlayerContent is FfmpegSoftwareControl ffmpegControl &&
+                _videoPlayerInstance is FfmpegPlayer ffmpegPlayer)
+            {
+                ffmpegControl.RelinquishPlayerForExternalDispose(ffmpegPlayer);
+            }
 
             // Mark before the content goes. On the OpenGL host mpv's render context may only be
             // freed from the GL deinit callback (the GL context has to be current), and dropping
@@ -1024,7 +1064,7 @@ namespace Nikse.SubtitleEdit.Controls.VideoPlayer
 
             Content = null;
 
-            if (_videoPlayerInstance is not IDisposable disposablePlayer)
+            if (disposablePlayer == null)
             {
                 return;
             }

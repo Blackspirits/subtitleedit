@@ -22,6 +22,14 @@ public interface IVideoPlayer
     Task LoadFile(string fileName, double startPositionSeconds = 0);
     void CloseFile();
 
+    /// <summary>
+    /// True when <see cref="CloseFile"/> may block long enough that definitive control teardown
+    /// should let <see cref="System.IDisposable.Dispose"/> perform it on the background dispose
+    /// thread instead of calling it first on the UI thread. The normal reusable Close path still
+    /// calls <see cref="CloseFile"/> directly.
+    /// </summary>
+    bool DeferCloseFileToDispose => false;
+
     void Play();
     void PlayOrPause();
     void Pause();

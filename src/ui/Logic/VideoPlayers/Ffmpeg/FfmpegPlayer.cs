@@ -83,6 +83,10 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
     public string Name => string.IsNullOrEmpty(_decoderName) ? "ffmpeg" : $"ffmpeg ({_decoderName})";
     public string FileName => _fileName;
 
+    // CloseFile joins the demux/decode/presenter workers (up to the teardown timeout). During
+    // definitive UI teardown Dispose already performs that close on a worker thread.
+    public bool DeferCloseFileToDispose => true;
+
     public bool CanLoad()
     {
         return FfmpegLibraries.IsAvailable();
