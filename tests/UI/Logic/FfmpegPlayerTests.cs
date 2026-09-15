@@ -217,6 +217,23 @@ public class FfmpegPlayerTests
     }
 
     [Theory]
+    [InlineData(false, false, 7, 7, false)]
+    [InlineData(true, false, 7, 7, true)]
+    [InlineData(false, true, 7, 7, true)]
+    [InlineData(false, false, 7, 8, true)]
+    public void ShouldInterruptOpen_StopsClosingDisposedOrStaleLoads(
+        bool closing,
+        bool ownerDisposed,
+        int loadGeneration,
+        int currentGeneration,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            FfmpegPlayer.ShouldInterruptOpen(closing, ownerDisposed, loadGeneration, currentGeneration));
+    }
+
+    [Theory]
     [InlineData(12.5, 60.0, 12.5)]
     [InlineData(75.0, 60.0, 60.0)] // past the end: clamped to the duration
     [InlineData(0.0, 60.0, 0.0)]
