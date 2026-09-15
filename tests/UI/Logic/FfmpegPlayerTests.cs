@@ -106,6 +106,14 @@ public class FfmpegPlayerTests
         queue.Close();
     }
 
+    [Theory]
+    [InlineData(7, 7, true)]
+    [InlineData(7, 8, false)]
+    public void CanPublishVideoFrame_RequiresCurrentSeekSerial(int frameSerial, int currentSerial, bool expected)
+    {
+        Assert.Equal(expected, FfmpegPlayer.CanPublishVideoFrame(frameSerial, currentSerial));
+    }
+
     [Fact]
     public void VideoFrameQueue_SizeChange_DropsOldPool()
     {
