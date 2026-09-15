@@ -212,6 +212,10 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
 
         lock (_currentFrameLock)
         {
+            // Any worker that survives the teardown timeout belongs to an older load generation
+            // and may no longer publish UI state after this point.
+            _decoderName = string.Empty;
+
             // The frame belonged to the session's pool, which is gone now.
             _currentFrame?.Dispose();
             _currentFrame = null;
@@ -364,18 +368,47 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         CloseFile();
     }
 
-    private void Present(VideoFrame frame, VideoFrameQueue pool)
+    internal bool TryPresentFrameFromSession(int loadGeneration, VideoFrame frame, VideoFrameQueue pool)
     {
-        VideoFrame? previous;
+        VideoFrame? previous = null;
+        var accepted = false;
         lock (_currentFrameLock)
         {
-            previous = _currentFrame;
-            _currentFrame = frame;
+            // CloseFile increments the generation before waiting for workers. A worker that
+            // outlives that wait must return its frame to its own pool instead of overwriting the
+            // current/new session's UI frame.
+            if (loadGeneration == Volatile.Read(ref _loadGeneration))
+            {
+                previous = _currentFrame;
+                _currentFrame = frame;
+                Interlocked.Increment(ref _frameVersion);
+                accepted = true;
+            }
+        }
+
+        if (!accepted)
+        {
+            pool.Return(frame);
+            return false;
         }
 
         pool.Return(previous);
-        Interlocked.Increment(ref _frameVersion);
         FrameReady?.Invoke();
+        return true;
+    }
+
+    internal bool TrySetDecoderNameFromSession(int loadGeneration, string decoderName)
+    {
+        lock (_currentFrameLock)
+        {
+            if (loadGeneration != Volatile.Read(ref _loadGeneration))
+            {
+                return false;
+            }
+
+            _decoderName = decoderName;
+            return true;
+        }
     }
 
     private static IAudioSink CreateAudioSink()
@@ -945,7 +978,9 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 var hardware = HardwareDeviceTypes.Length > 0;
                 codec = OpenDecoder(stream, hardware);
                 hardware = codec->hw_device_ctx != null;
-                _owner._decoderName = hardware ? HardwareDeviceName(codec) : string.Empty;
+                _owner.TrySetDecoderNameFromSession(
+                    _ownerLoadGeneration,
+                    hardware ? HardwareDeviceName(codec) : string.Empty);
                 frame = ffmpeg.av_frame_alloc();
                 transferFrame = ffmpeg.av_frame_alloc();
                 var timeBase = stream->time_base;
@@ -1163,7 +1198,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             codec = null;
             ffmpeg.avcodec_free_context(&old);
             hardware = false;
-            _owner._decoderName = string.Empty;
+            _owner.TrySetDecoderNameFromSession(_ownerLoadGeneration, string.Empty);
             codec = OpenDecoder(stream, hardware: false);
         }
 
@@ -1833,7 +1868,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             // Timestamp after the serial so HasPlaybackRestartedSince never sees a new
             // timestamp with an old serial.
             Interlocked.Exchange(ref _lastRestartTimestamp, Stopwatch.GetTimestamp());
-            _owner.Present(frame, _videoFrames);
+            _owner.TryPresentFrameFromSession(_ownerLoadGeneration, frame, _videoFrames);
         }
 
         // ---------------------------------------------------------------- teardown

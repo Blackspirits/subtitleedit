@@ -233,6 +233,43 @@ public class FfmpegPlayerTests
             FfmpegPlayer.ShouldInterruptOpen(closing, ownerDisposed, loadGeneration, currentGeneration));
     }
 
+    [Fact]
+    public void StaleSessionCannotOverwriteDecoderBadgeAfterClose()
+    {
+        using var player = new FfmpegPlayer();
+
+        Assert.True(player.TrySetDecoderNameFromSession(0, "old-hardware"));
+        Assert.Contains("old-hardware", player.Name);
+
+        player.CloseFile(); // generation 0 -> 1 and clears owner-visible state
+
+        Assert.False(player.TrySetDecoderNameFromSession(0, "stale-hardware"));
+        Assert.Equal("ffmpeg", player.Name);
+    }
+
+    [Fact]
+    public void StaleSessionFrameIsReturnedInsteadOfPublishedAfterClose()
+    {
+        using var player = new FfmpegPlayer();
+        var queue = new VideoFrameQueue(1);
+        var serial = 0;
+        var frame = queue.Rent(4, 4, 0, ref serial)!;
+
+        player.CloseFile(); // invalidate generation 0 before the stale worker publishes
+        var versionAfterClose = player.FrameVersion;
+
+        Assert.False(player.TryPresentFrameFromSession(0, frame, queue));
+        Assert.Equal(versionAfterClose, player.FrameVersion);
+        Assert.Equal((0, 0), player.CurrentFrameSize);
+
+        // Rejection returns ownership to the originating session's pool instead of leaking the
+        // frame or handing it to the new/current session.
+        var reused = queue.Rent(4, 4, 0, ref serial);
+        Assert.Same(frame, reused);
+        queue.Return(reused);
+        queue.Close();
+    }
+
     [Theory]
     [InlineData(12.5, 60.0, 12.5)]
     [InlineData(75.0, 60.0, 60.0)] // past the end: clamped to the duration
