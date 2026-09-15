@@ -244,6 +244,15 @@ public class FfmpegPlayerTests
         Assert.Null(FfmpegPlayer.SeekTarget(value, 60));
     }
 
+    [Fact]
+    public void IsDemuxEndOfInput_DistinguishesRecoverableReadErrors()
+    {
+        Assert.True(FfmpegPlayer.IsDemuxEndOfInput(ffmpeg.AVERROR_EOF, avioEnded: false));
+        Assert.True(FfmpegPlayer.IsDemuxEndOfInput(ffmpeg.AVERROR_INVALIDDATA, avioEnded: true));
+        Assert.False(FfmpegPlayer.IsDemuxEndOfInput(ffmpeg.AVERROR_INVALIDDATA, avioEnded: false));
+        Assert.False(FfmpegPlayer.IsDemuxEndOfInput(-ffmpeg.EAGAIN, avioEnded: false));
+    }
+
     [Theory]
     [InlineData(AVSampleFormat.AV_SAMPLE_FMT_U8, false)]
     [InlineData(AVSampleFormat.AV_SAMPLE_FMT_S16, false)]
