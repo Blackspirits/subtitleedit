@@ -304,6 +304,11 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         return duration > 0 ? Math.Min(value, duration) : value;
     }
 
+    internal static double WallClockPosition(double basePosition, double elapsedSeconds, double speed)
+    {
+        return basePosition + elapsedSeconds * speed;
+    }
+
     public double Duration => _session?.Duration ?? 0;
 
     public int VolumeMaximum => 100;
@@ -617,11 +622,15 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                     return;
                 }
 
+                // Capture the playhead while Clock() still uses the old rate. For video-only
+                // playback (or before audio has anchored), changing _speed first would reinterpret
+                // the entire elapsed wall-clock interval at the new rate and jump the seek target.
+                var position = Position;
                 _speed = value;
 
                 // The queued audio was resampled for the old speed and the clocks were anchored
                 // under it; a seek to where we are re-anchors everything at the new speed.
-                Seek(Position);
+                Seek(position);
             }
         }
 
@@ -769,7 +778,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 }
             }
 
-            return _wallClockBase + _wallClock.Elapsed.TotalSeconds * _speed;
+            return WallClockPosition(_wallClockBase, _wallClock.Elapsed.TotalSeconds, _speed);
         }
 
         /// <summary>True when a seek newer than the given serial has been requested (performed or not).</summary>

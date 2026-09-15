@@ -217,6 +217,32 @@ public class FfmpegPlayerTests
     }
 
     [Theory]
+    [InlineData(0.0, 10.0, 1.0, 10.0)]
+    [InlineData(0.0, 10.0, 2.0, 20.0)]
+    [InlineData(5.0, 10.0, 0.5, 10.0)]
+    public void WallClockPosition_AppliesRateOnlyToElapsedTime(
+        double basePosition,
+        double elapsedSeconds,
+        double speed,
+        double expected)
+    {
+        Assert.Equal(expected, FfmpegPlayer.WallClockPosition(basePosition, elapsedSeconds, speed));
+    }
+
+    [Fact]
+    public void SpeedChange_MustCaptureWallClockPositionBeforeChangingRate()
+    {
+        // Ten seconds actually played at 1x is still ten seconds when the user switches to 2x.
+        // Reading Clock only after mutating the rate would reinterpret those same ten elapsed
+        // seconds at 2x and incorrectly seek to 20 s.
+        var correctTarget = FfmpegPlayer.WallClockPosition(0, 10, 1);
+        var wrongTargetIfRateChangesFirst = FfmpegPlayer.WallClockPosition(0, 10, 2);
+
+        Assert.Equal(10, correctTarget);
+        Assert.Equal(20, wrongTargetIfRateChangesFirst);
+    }
+
+    [Theory]
     [InlineData(12.5, 60.0, 12.5)]
     [InlineData(75.0, 60.0, 60.0)] // past the end: clamped to the duration
     [InlineData(0.0, 60.0, 0.0)]
