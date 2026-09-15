@@ -179,6 +179,11 @@ public sealed unsafe partial class WaveOutAudioSink : IAudioSink
             _bufferBytes -= _bufferBytes % format.nBlockAlign;
 
             _doneEvent = CreateEventW(IntPtr.Zero, false, false, IntPtr.Zero);
+            if (_doneEvent == IntPtr.Zero)
+            {
+                throw new InvalidOperationException($"CreateEventW failed with error {Marshal.GetLastWin32Error()}");
+            }
+
             var result = waveOutOpen(out _device, WaveMapper, ref format, _doneEvent, IntPtr.Zero, CallbackEvent);
             if (result != MmSysErrNoError)
             {
@@ -188,6 +193,10 @@ public sealed unsafe partial class WaveOutAudioSink : IAudioSink
 
             _headers = Marshal.AllocHGlobal(sizeof(WaveHdr) * BufferCount);
             _data = Marshal.AllocHGlobal(_bufferBytes * BufferCount);
+
+            // Initialize every header before preparing any of them. If preparation later fails,
+            // CloseCore can safely unprepare the whole array instead of touching uninitialized
+            // native memory after the failing index.
             for (var i = 0; i < BufferCount; i++)
             {
                 var header = (WaveHdr*)_headers + i;
@@ -197,7 +206,18 @@ public sealed unsafe partial class WaveOutAudioSink : IAudioSink
                     dwBufferLength = (uint)_bufferBytes,
                     dwFlags = 0, // must be zero when prepared
                 };
-                waveOutPrepareHeader(_device, (IntPtr)header, (uint)sizeof(WaveHdr));
+            }
+
+            for (var i = 0; i < BufferCount; i++)
+            {
+                var header = (WaveHdr*)_headers + i;
+                result = waveOutPrepareHeader(_device, (IntPtr)header, (uint)sizeof(WaveHdr));
+                if (result != MmSysErrNoError)
+                {
+                    CloseCore();
+                    throw new InvalidOperationException($"waveOutPrepareHeader failed with error {result}");
+                }
+
                 header->dwFlags |= WhdrDone; // free
             }
 
