@@ -14,17 +14,21 @@ public interface IAudioSink : IDisposable
     void Open(int sampleRate, int channels);
 
     /// <summary>
-    /// Queue PCM for playback. Blocks while the device queue is full - that back pressure is
-    /// what paces the audio decoder. Returns false when the sink was reset or closed while
-    /// waiting, so the caller can drop the data instead of pushing stale audio after a seek.
+    /// Queue PCM for playback under the given seek serial. Blocks while the device queue is full -
+    /// that back pressure is what paces the audio decoder. Returns false when the serial is no
+    /// longer current, or when the sink was reset/closed while waiting, so stale PCM can never be
+    /// queued after a seek.
     /// </summary>
-    bool Write(ReadOnlySpan<byte> pcm);
+    bool Write(ReadOnlySpan<byte> pcm, int serial);
 
     /// <summary>Seconds of audio played since the last <see cref="Reset"/>.</summary>
     double PlayedSeconds { get; }
 
-    /// <summary>Drop everything queued and restart the played counter at zero (seek, stop).</summary>
-    void Reset();
+    /// <summary>
+    /// Drop everything queued, make <paramref name="serial"/> the only serial accepted by
+    /// <see cref="Write"/>, and restart the played counter at zero (seek, stop).
+    /// </summary>
+    void Reset(int serial);
 
     void Pause();
     void Resume();

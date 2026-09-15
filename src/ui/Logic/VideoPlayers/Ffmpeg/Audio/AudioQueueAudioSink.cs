@@ -101,6 +101,8 @@ public sealed unsafe partial class AudioQueueAudioSink : IAudioSink
     private int _nextBuffer;
     private int _inFlight;
     private int _generation;
+    private int _serial;
+    private bool _resetting;
     private volatile bool _disposed;
     private volatile bool _paused;
     private bool _started;
@@ -157,6 +159,8 @@ public sealed unsafe partial class AudioQueueAudioSink : IAudioSink
             _nextBuffer = 0;
             _inFlight = 0;
             _started = false;
+            _serial = 0;
+            _resetting = false;
             _paused = false;
             _sampleBase = 0;
             _lastSampleTime = 0;
@@ -239,93 +243,86 @@ public sealed unsafe partial class AudioQueueAudioSink : IAudioSink
         return _lastSampleTime;
     }
 
-    public bool Write(ReadOnlySpan<byte> pcm)
+    public bool Write(ReadOnlySpan<byte> pcm, int serial)
     {
-        var generation = _generation;
+        var generation = Volatile.Read(ref _generation);
         var offset = 0;
         while (offset < pcm.Length)
         {
-            if (_disposed || generation != _generation)
-            {
-                return false;
-            }
-
-            AudioQueueBuffer* buffer;
+            var queued = false;
             lock (_lock)
             {
-                if (_queue == IntPtr.Zero)
+                if (_disposed || _queue == IntPtr.Zero || _resetting || generation != _generation || serial != _serial)
                 {
                     return false;
                 }
 
-                buffer = _free[_nextBuffer] ? _buffers[_nextBuffer] : null;
-            }
-
-            if (buffer == null)
-            {
-                // All buffers are queued - wait for the queue to hand one back. A queue that has
-                // never been started hands nothing back, so start it first if we are allowed to.
-                lock (_lock)
+                var buffer = _free[_nextBuffer] ? _buffers[_nextBuffer] : null;
+                if (buffer != null)
                 {
+                    var count = Math.Min(_bufferBytes, pcm.Length - offset);
+                    pcm.Slice(offset, count).CopyTo(new Span<byte>((void*)buffer->mAudioData, count));
+
+                    if (_inFlight == 0)
+                    {
+                        // The queue was starved: whatever the clock did meanwhile was silence, so
+                        // re-base the clock to now - but keep the bytes played so far in the base.
+                        _sampleBase = SampleBaseAfterUnderrun(CurrentSampleTime(), _bytesWritten, _blockAlign);
+                    }
+
+                    buffer->mAudioDataByteSize = (uint)count;
+                    _free[_nextBuffer] = false;
+                    _inFlight++;
+                    if (AudioQueueEnqueueBuffer(_queue, buffer, 0, IntPtr.Zero) != 0)
+                    {
+                        _free[_nextBuffer] = true;
+                        _inFlight--;
+                        return false;
+                    }
+
+                    _bytesWritten += count;
+                    _nextBuffer = (_nextBuffer + 1) % BufferCount;
+                    offset += count;
+                    queued = true;
                     StartIfQueuedCore();
                 }
-
-                _doneEvent.WaitOne(BufferMilliseconds);
-                continue;
+                else
+                {
+                    // A queue that has never been started hands nothing back, so start it first
+                    // if playback is allowed. Copy + enqueue stay in this same critical section:
+                    // Reset cannot recycle a buffer between those two operations.
+                    StartIfQueuedCore();
+                }
             }
 
-            var count = Math.Min(_bufferBytes, pcm.Length - offset);
-            pcm.Slice(offset, count).CopyTo(new Span<byte>((void*)buffer->mAudioData, count));
-            offset += count;
-
-            lock (_lock)
+            if (!queued)
             {
-                if (_queue == IntPtr.Zero || generation != _generation)
-                {
-                    return false;
-                }
-
-                if (_inFlight == 0)
-                {
-                    // The queue was starved: whatever the clock did meanwhile was silence, so
-                    // re-base the clock to now - but keep the bytes played so far in the base
-                    // (they stay counted in _bytesWritten, which only Reset clears). PlayedSeconds
-                    // must stay continuous: the player anchors it once per seek, so restarting it
-                    // from zero would jump the media clock back by everything played since.
-                    _sampleBase = SampleBaseAfterUnderrun(CurrentSampleTime(), _bytesWritten, _blockAlign);
-                }
-
-                buffer->mAudioDataByteSize = (uint)count;
-                _free[_nextBuffer] = false;
-                _inFlight++;
-                if (AudioQueueEnqueueBuffer(_queue, buffer, 0, IntPtr.Zero) != 0)
-                {
-                    _free[_nextBuffer] = true;
-                    _inFlight--;
-                    return false;
-                }
-
-                _bytesWritten += count;
-                _nextBuffer = (_nextBuffer + 1) % BufferCount;
-
-                StartIfQueuedCore();
+                _doneEvent.WaitOne(BufferMilliseconds);
             }
         }
 
         return true;
     }
 
-    public void Reset()
+    public void Reset(int serial)
     {
-        Interlocked.Increment(ref _generation);
         IntPtr queue;
         lock (_lock)
         {
+            Interlocked.Increment(ref _generation);
+            Volatile.Write(ref _serial, serial);
+            _resetting = true;
             queue = _queue;
         }
 
         if (queue == IntPtr.Zero)
         {
+            lock (_lock)
+            {
+                _resetting = false;
+            }
+
+            _doneEvent.Set();
             return;
         }
 
@@ -337,6 +334,8 @@ public sealed unsafe partial class AudioQueueAudioSink : IAudioSink
         {
             if (_queue != queue)
             {
+                _resetting = false;
+                _doneEvent.Set();
                 return;
             }
 
@@ -349,6 +348,7 @@ public sealed unsafe partial class AudioQueueAudioSink : IAudioSink
             _nextBuffer = 0;
             _bytesWritten = 0;
             _sampleBase = CurrentSampleTime();
+            _resetting = false;
             _doneEvent.Set();
         }
     }

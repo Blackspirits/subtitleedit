@@ -130,7 +130,7 @@ public class FfmpegPlayerTests
         sink.Open(48000, 2);
         sink.Resume();
 
-        Assert.True(sink.Write(new byte[48000 * 4 / 10])); // 100 ms
+        Assert.True(sink.Write(new byte[48000 * 4 / 10], serial: 0)); // 100 ms
         Thread.Sleep(250);
 
         Assert.InRange(sink.PlayedSeconds, 0.09, 0.101);
@@ -142,17 +142,29 @@ public class FfmpegPlayerTests
         using var sink = new SilentAudioSink();
         sink.Open(48000, 2);
         sink.Pause(); // clock stopped: nothing drains, so the second write must block
-        Assert.True(sink.Write(new byte[48000 * 4 / 10])); // 100 ms fills the lead
+        Assert.True(sink.Write(new byte[48000 * 4 / 10], serial: 0)); // 100 ms fills the lead
 
         var result = true;
-        var writer = new Thread(() => { result = sink.Write(new byte[48000 * 4]); });
+        var writer = new Thread(() => { result = sink.Write(new byte[48000 * 4], serial: 0); });
         writer.Start();
         Thread.Sleep(100);
         Assert.True(writer.IsAlive);
 
-        sink.Reset();
+        sink.Reset(serial: 1);
         Assert.True(writer.Join(2000));
         Assert.False(result);
+    }
+
+    [Fact]
+    public void SilentAudioSink_ResetRejectsOldSerialEvenWhenWriteStartsAfterReset()
+    {
+        using var sink = new SilentAudioSink();
+        sink.Open(48000, 2);
+
+        sink.Reset(serial: 1);
+
+        Assert.False(sink.Write(new byte[480], serial: 0));
+        Assert.True(sink.Write(new byte[480], serial: 1));
     }
 
     [Fact]

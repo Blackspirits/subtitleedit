@@ -104,6 +104,7 @@ public sealed unsafe partial class WaveOutAudioSink : IAudioSink
     private int _blockAlign = 4;
     private int _nextBuffer;
     private int _generation;
+    private int _serial;
     private volatile bool _disposed;
     private volatile bool _paused;
 
@@ -160,6 +161,7 @@ public sealed unsafe partial class WaveOutAudioSink : IAudioSink
             _nextBuffer = 0;
             _positionBase = 0;
             _lastRawPosition = 0;
+            _serial = 0;
             _paused = false;
         }
     }
@@ -214,70 +216,58 @@ public sealed unsafe partial class WaveOutAudioSink : IAudioSink
         return _lastRawPosition;
     }
 
-    public bool Write(ReadOnlySpan<byte> pcm)
+    public bool Write(ReadOnlySpan<byte> pcm, int serial)
     {
-        var generation = _generation;
+        var generation = Volatile.Read(ref _generation);
         var offset = 0;
         while (offset < pcm.Length)
         {
-            if (_disposed || generation != _generation)
-            {
-                return false;
-            }
-
-            WaveHdr* header;
+            var queued = false;
             lock (_lock)
             {
-                if (_device == IntPtr.Zero)
+                if (_disposed || _device == IntPtr.Zero || generation != _generation || serial != _serial)
                 {
                     return false;
                 }
 
-                header = (WaveHdr*)_headers + _nextBuffer;
-                if ((header->dwFlags & WhdrDone) == 0)
+                var header = (WaveHdr*)_headers + _nextBuffer;
+                if ((header->dwFlags & WhdrDone) != 0)
                 {
-                    header = null;
+                    var count = Math.Min(_bufferBytes, pcm.Length - offset);
+                    pcm.Slice(offset, count).CopyTo(new Span<byte>((void*)header->lpData, count));
+
+                    header->dwBufferLength = (uint)count;
+                    header->dwFlags &= ~WhdrDone;
+                    if (waveOutWrite(_device, (IntPtr)header, (uint)sizeof(WaveHdr)) != MmSysErrNoError)
+                    {
+                        header->dwFlags |= WhdrDone;
+                        return false;
+                    }
+
+                    _nextBuffer = (_nextBuffer + 1) % BufferCount;
+                    offset += count;
+                    queued = true;
                 }
             }
 
-            if (header == null)
+            if (!queued)
             {
-                // All buffers are queued - wait for the driver to hand one back.
+                // All buffers are queued - wait for the driver to hand one back. Copying into a
+                // buffer and enqueuing it stay under _lock so Reset cannot recycle that buffer
+                // between the copy and the final serial/generation check.
                 WaitForSingleObject(_doneEvent, (uint)BufferMilliseconds);
-                continue;
-            }
-
-            var count = Math.Min(_bufferBytes, pcm.Length - offset);
-            pcm.Slice(offset, count).CopyTo(new Span<byte>((void*)header->lpData, count));
-            offset += count;
-
-            lock (_lock)
-            {
-                if (_device == IntPtr.Zero || generation != _generation)
-                {
-                    return false;
-                }
-
-                header->dwBufferLength = (uint)count;
-                header->dwFlags &= ~WhdrDone;
-                if (waveOutWrite(_device, (IntPtr)header, (uint)sizeof(WaveHdr)) != MmSysErrNoError)
-                {
-                    header->dwFlags |= WhdrDone;
-                    return false;
-                }
-
-                _nextBuffer = (_nextBuffer + 1) % BufferCount;
             }
         }
 
         return true;
     }
 
-    public void Reset()
+    public void Reset(int serial)
     {
         lock (_lock)
         {
             Interlocked.Increment(ref _generation);
+            Volatile.Write(ref _serial, serial);
             if (_device == IntPtr.Zero)
             {
                 return;
