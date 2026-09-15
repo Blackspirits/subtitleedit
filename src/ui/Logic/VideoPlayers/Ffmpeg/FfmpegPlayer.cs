@@ -359,7 +359,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         CloseFile();
     }
 
-    private void Present(VideoFrame frame, VideoFrameQueue pool)
+    private void PublishFrame(VideoFrame frame, VideoFrameQueue pool)
     {
         VideoFrame? previous;
         lock (_currentFrameLock)
@@ -370,6 +370,10 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
 
         pool.Return(previous);
         Interlocked.Increment(ref _frameVersion);
+    }
+
+    private void NotifyFrameReady()
+    {
         FrameReady?.Invoke();
     }
 
@@ -403,6 +407,11 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             or AVSampleFormat.AV_SAMPLE_FMT_FLTP
             or AVSampleFormat.AV_SAMPLE_FMT_DBLP
             or AVSampleFormat.AV_SAMPLE_FMT_S64P;
+    }
+
+    internal static bool CanPublishVideoFrame(int frameSerial, int currentSerial)
+    {
+        return frameSerial == currentSerial;
     }
 
     private static double TimestampToSeconds(long timestamp, AVRational timeBase)
@@ -1782,15 +1791,25 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
 
         private void ShowFrame(VideoFrame frame)
         {
-            var popped = _videoFrames.Pop();
-            if (!ReferenceEquals(popped, frame))
-            {
-                _videoFrames.Return(popped);
-                return;
-            }
-
+            var published = false;
             lock (_seekLock)
             {
+                // The initial PresentLoop check is only advisory: a successful seek can advance
+                // _currentSerial before this frame is popped. Claim and publish the frame while
+                // holding the same lock that commits seek serials, so an old serial can never be
+                // published after a newer seek has committed.
+                if (!CanPublishVideoFrame(frame.Serial, _currentSerial))
+                {
+                    return;
+                }
+
+                var popped = _videoFrames.Pop();
+                if (!ReferenceEquals(popped, frame))
+                {
+                    _videoFrames.Return(popped);
+                    return;
+                }
+
                 if (frame.Serial > _restartSerial)
                 {
                     _restartSerial = frame.Serial;
@@ -1803,12 +1822,18 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 {
                     _pausedPosition = frame.Pts;
                 }
+
+                // Publish frame state before releasing the seek lock. The callback itself is
+                // deliberately deferred until after the lock so UI/user code never runs under it.
+                Interlocked.Exchange(ref _lastRestartTimestamp, Stopwatch.GetTimestamp());
+                _owner.PublishFrame(frame, _videoFrames);
+                published = true;
             }
 
-            // Timestamp after the serial so HasPlaybackRestartedSince never sees a new
-            // timestamp with an old serial.
-            Interlocked.Exchange(ref _lastRestartTimestamp, Stopwatch.GetTimestamp());
-            _owner.Present(frame, _videoFrames);
+            if (published)
+            {
+                _owner.NotifyFrameReady();
+            }
         }
 
         // ---------------------------------------------------------------- teardown
