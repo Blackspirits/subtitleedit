@@ -217,6 +217,48 @@ public class FfmpegPlayerTests
     }
 
     [Theory]
+    [InlineData(0.0, 0.0, 60.0, 60.0)]
+    [InlineData(0.0, 5.0, 60.0, 65.0)]
+    [InlineData(10.0, 15.0, 60.0, 65.0)]
+    [InlineData(10.0, double.NaN, 60.0, 60.0)]
+    [InlineData(10.0, 5.0, 2.0, 0.0)]
+    public void StreamEndPosition_UsesStartOffsetAndDuration(
+        double formatStart,
+        double streamStart,
+        double streamDuration,
+        double expected)
+    {
+        Assert.Equal(expected, FfmpegPlayer.StreamEndPosition(formatStart, streamStart, streamDuration));
+    }
+
+    [Theory]
+    [InlineData(0.0)]
+    [InlineData(-1.0)]
+    [InlineData(double.NaN)]
+    public void StreamEndPosition_UnknownDurationStaysUnknown(double streamDuration)
+    {
+        Assert.True(double.IsNaN(FfmpegPlayer.StreamEndPosition(0, 5, streamDuration)));
+    }
+
+    [Theory]
+    [InlineData(120.0, 50.0, 65.0, 120.0)]
+    [InlineData(120.0, double.NaN, double.NaN, 120.0)]
+    [InlineData(0.0, 50.0, 65.0, 65.0)]
+    [InlineData(double.NaN, 50.0, 65.0, 65.0)]
+    [InlineData(0.0, 50.0, 0.0, 50.0)]
+    [InlineData(0.0, 0.0, 0.0, 0.0)]
+    [InlineData(0.0, 50.0, double.NaN, 0.0)]
+    [InlineData(0.0, double.NaN, 65.0, 0.0)]
+    public void PlaybackDuration_PrefersContainerThenSelectedPlaybackStreams(
+        double formatDuration,
+        double videoEnd,
+        double audioEnd,
+        double expected)
+    {
+        Assert.Equal(expected, FfmpegPlayer.PlaybackDuration(formatDuration, videoEnd, audioEnd));
+    }
+
+    [Theory]
     [InlineData(60.0, 42.5, 60.0)]
     [InlineData(0.0, 42.5, 42.5)]
     [InlineData(double.NaN, 42.5, 42.5)]

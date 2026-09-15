@@ -431,6 +431,38 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         return timestamp == ffmpeg.AV_NOPTS_VALUE ? double.NaN : timestamp * ffmpeg.av_q2d(timeBase);
     }
 
+    internal static double StreamEndPosition(double formatStartSeconds, double streamStartSeconds, double streamDurationSeconds)
+    {
+        if (!double.IsFinite(streamDurationSeconds) || streamDurationSeconds <= 0)
+        {
+            return double.NaN;
+        }
+
+        var origin = double.IsFinite(formatStartSeconds) ? formatStartSeconds : 0;
+        var start = double.IsFinite(streamStartSeconds) ? streamStartSeconds : origin;
+        return Math.Max(0, start - origin + streamDurationSeconds);
+    }
+
+    internal static double PlaybackDuration(double formatDuration, double videoEndPosition, double audioEndPosition)
+    {
+        if (double.IsFinite(formatDuration) && formatDuration > 0)
+        {
+            return formatDuration;
+        }
+
+        // Zero means that playback stream is absent. A non-finite value means a selected
+        // stream has no trustworthy end; in that case a partial sibling duration must not be
+        // promoted to an authoritative total because the unknown stream may continue longer.
+        if (!double.IsFinite(videoEndPosition) || !double.IsFinite(audioEndPosition))
+        {
+            return 0;
+        }
+
+        var videoEnd = videoEndPosition > 0 ? videoEndPosition : 0;
+        var audioEnd = audioEndPosition > 0 ? audioEndPosition : 0;
+        return Math.Max(videoEnd, audioEnd);
+    }
+
     private static string? DictionaryValue(AVDictionary* dictionary, string key)
     {
         var entry = ffmpeg.av_dict_get(dictionary, key, null, 0);
@@ -449,7 +481,9 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         private readonly int _videoStreamIndex = -1;
         private int _audioStreamIndex = -1;
         private readonly List<int> _audioStreamIndexes = new();
+        private readonly Dictionary<int, double> _playbackStreamEndPositions = new();
         private readonly double _startTimeSeconds;
+        private readonly double _formatDuration;
 
         private readonly PacketQueue _videoPackets = new();
         private readonly PacketQueue _audioPackets = new();
@@ -495,7 +529,11 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         private volatile float _gain = 1f;
         private double _speed = 1.0;
 
-        public double Duration { get; }
+        public double Duration => PlaybackDuration(
+            _formatDuration,
+            SelectedStreamEndPosition(_videoStreamIndex),
+            SelectedStreamEndPosition(_audioStreamIndex));
+
         public int VideoWidth { get; }
         public int VideoHeight { get; }
         public double DisplayAspectRatio { get; }
@@ -577,6 +615,27 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 throw new InvalidOperationException("No audio or video stream found");
             }
 
+            // Cache only streams this player can actually reproduce. Duration is read from UI
+            // threads while teardown may close _format, so the public getter must never walk
+            // native AVStream pointers after construction.
+            if (_hasVideo)
+            {
+                var stream = format->streams[_videoStreamIndex];
+                _playbackStreamEndPositions[_videoStreamIndex] = StreamEndPosition(
+                    _startTimeSeconds,
+                    TimestampToSeconds(stream->start_time, stream->time_base),
+                    TimestampToSeconds(stream->duration, stream->time_base));
+            }
+
+            foreach (var audioIndex in _audioStreamIndexes)
+            {
+                var stream = format->streams[audioIndex];
+                _playbackStreamEndPositions[audioIndex] = StreamEndPosition(
+                    _startTimeSeconds,
+                    TimestampToSeconds(stream->start_time, stream->time_base),
+                    TimestampToSeconds(stream->duration, stream->time_base));
+            }
+
             if (_hasVideo)
             {
                 var parameters = format->streams[_videoStreamIndex]->codecpar;
@@ -588,21 +647,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             }
 
             var duration = format->duration == ffmpeg.AV_NOPTS_VALUE ? double.NaN : format->duration / (double)ffmpeg.AV_TIME_BASE;
-            if (double.IsNaN(duration) || duration <= 0)
-            {
-                duration = 0;
-                for (var i = 0; i < (int)format->nb_streams; i++)
-                {
-                    var stream = format->streams[i];
-                    var streamDuration = TimestampToSeconds(stream->duration, stream->time_base);
-                    if (!double.IsNaN(streamDuration) && streamDuration > duration)
-                    {
-                        duration = streamDuration;
-                    }
-                }
-            }
-
-            Duration = duration;
+            _formatDuration = double.IsFinite(duration) && duration > 0 ? duration : 0;
 
             _audioSink = CreateAudioSink();
             if (_hasAudio)
@@ -621,6 +666,13 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
 
                 _audioSink.Pause();
             }
+        }
+
+        private double SelectedStreamEndPosition(int streamIndex)
+        {
+            return streamIndex >= 0 && _playbackStreamEndPositions.TryGetValue(streamIndex, out var endPosition)
+                ? endPosition
+                : 0;
         }
 
         public bool IsPlaying => _playing;
