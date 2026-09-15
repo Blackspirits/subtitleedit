@@ -5,6 +5,49 @@ using System.Threading;
 
 namespace Nikse.SubtitleEdit.Logic.VideoPlayers.Ffmpeg.Audio;
 
+internal static class WaveOutPosition
+{
+    internal const uint TimeMilliseconds = 0x0001;
+    internal const uint TimeSamples = 0x0002;
+    internal const uint TimeBytes = 0x0004;
+
+    internal static long? CounterToBytes(uint type, uint value, int blockAlign, int bytesPerSecond)
+    {
+        return type switch
+        {
+            TimeBytes => value,
+            TimeSamples => (long)value * blockAlign,
+            TimeMilliseconds => (long)value * bytesPerSecond / 1000,
+            _ => null,
+        };
+    }
+
+    internal static long CounterWrapBytes(uint type, int blockAlign, int bytesPerSecond)
+    {
+        const long counterSpan = 1L << 32;
+        return type switch
+        {
+            TimeBytes => counterSpan,
+            TimeSamples => counterSpan * blockAlign,
+            TimeMilliseconds => counterSpan * bytesPerSecond / 1000,
+            _ => 0,
+        };
+    }
+
+    internal static long WrapBaseAfterFormatChange(long convertedBytes, long lastPositionBytes, long wrapBytes)
+    {
+        if (wrapBytes <= 0 || convertedBytes >= lastPositionBytes)
+        {
+            return 0;
+        }
+
+        // Pick the nearest wrap epoch. A driver switching from samples to milliseconds can round
+        // the same instant a few bytes backwards; that is not evidence of a 32-bit counter wrap.
+        var difference = lastPositionBytes - convertedBytes;
+        return ((difference + wrapBytes / 2) / wrapBytes) * wrapBytes;
+    }
+}
+
 /// <summary>
 /// Windows audio output through the classic waveOut API (winmm.dll). It is available on every
 /// Windows, needs no COM apartment, and reports the played position straight from the driver -
@@ -20,8 +63,6 @@ public sealed unsafe partial class WaveOutAudioSink : IAudioSink
     private const uint WaveMapper = 0xFFFFFFFF;
     private const uint CallbackEvent = 0x00050000;
     private const uint WhdrDone = 0x00000001;
-    private const uint TimeBytes = 0x0004;
-    private const uint TimeSamples = 0x0002;
     private const uint MmSysErrNoError = 0;
 
     [StructLayout(LayoutKind.Sequential)]
@@ -112,6 +153,9 @@ public sealed unsafe partial class WaveOutAudioSink : IAudioSink
     // the counter value seen at the reset.
     private long _positionBase;
     private long _lastRawPosition;
+    private uint _lastPositionType;
+    private uint _lastPositionCounter;
+    private long _positionWrapBaseBytes;
 
     public void Open(int sampleRate, int channels)
     {
@@ -160,6 +204,9 @@ public sealed unsafe partial class WaveOutAudioSink : IAudioSink
             _nextBuffer = 0;
             _positionBase = 0;
             _lastRawPosition = 0;
+            _lastPositionType = 0;
+            _lastPositionCounter = 0;
+            _positionWrapBaseBytes = 0;
             _paused = false;
         }
     }
@@ -183,35 +230,51 @@ public sealed unsafe partial class WaveOutAudioSink : IAudioSink
 
     private long GetRawPositionBytes()
     {
-        var time = new MmTime { wType = TimeBytes };
+        // Samples are Microsoft's preferred waveform position format. Drivers may still answer
+        // in another supported MMTIME format, so normalize the returned type rather than assuming
+        // the request was honoured.
+        var time = new MmTime { wType = WaveOutPosition.TimeSamples };
         if (waveOutGetPosition(_device, ref time, (uint)sizeof(MmTime)) != MmSysErrNoError)
         {
             return _lastRawPosition;
         }
 
-        long position;
-        if (time.wType == TimeBytes)
-        {
-            position = time.u;
-        }
-        else if (time.wType == TimeSamples)
-        {
-            // Some drivers refuse TIME_BYTES and answer in sample frames instead.
-            position = (long)time.u * _blockAlign;
-        }
-        else
+        var converted = WaveOutPosition.CounterToBytes(time.wType, time.u, _blockAlign, _bytesPerSecond);
+        if (!converted.HasValue)
         {
             return _lastRawPosition;
         }
 
-        // The 32-bit counter wraps after ~6 hours of 48 kHz stereo; keep it monotonic.
-        if (position < (_lastRawPosition & 0xFFFFFFFF))
+        var wrapBytes = WaveOutPosition.CounterWrapBytes(time.wType, _blockAlign, _bytesPerSecond);
+        if (_lastPositionType == time.wType)
         {
-            _lastRawPosition += 0x100000000;
+            if (time.u < _lastPositionCounter && wrapBytes > 0)
+            {
+                _positionWrapBaseBytes += wrapBytes;
+            }
+        }
+        else
+        {
+            // A driver is allowed to answer a later query in a different format. Choose the wrap
+            // epoch nearest the previous absolute position; small conversion-rounding differences
+            // must not be mistaken for an entire 32-bit counter wrap.
+            _positionWrapBaseBytes = WaveOutPosition.WrapBaseAfterFormatChange(
+                converted.Value,
+                _lastRawPosition,
+                wrapBytes);
         }
 
-        _lastRawPosition = (_lastRawPosition & ~0xFFFFFFFFL) | position;
-        return _lastRawPosition;
+        var position = _positionWrapBaseBytes + converted.Value;
+        if (position < _lastRawPosition)
+        {
+            // Millisecond conversion can round a format switch slightly backwards.
+            position = _lastRawPosition;
+        }
+
+        _lastPositionType = time.wType;
+        _lastPositionCounter = time.u;
+        _lastRawPosition = position;
+        return position;
     }
 
     public bool Write(ReadOnlySpan<byte> pcm)
@@ -288,6 +351,9 @@ public sealed unsafe partial class WaveOutAudioSink : IAudioSink
             // Drivers differ on whether waveOutReset rewinds the position counter; forget the
             // wrap-around history first so a rewind to 0 is not mistaken for a 32-bit wrap.
             _lastRawPosition = 0;
+            _lastPositionType = 0;
+            _lastPositionCounter = 0;
+            _positionWrapBaseBytes = 0;
             _positionBase = GetRawPositionBytes();
             _nextBuffer = 0;
             for (var i = 0; i < BufferCount; i++)
