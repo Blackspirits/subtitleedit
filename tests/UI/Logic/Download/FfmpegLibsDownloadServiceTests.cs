@@ -1,5 +1,6 @@
 using Nikse.SubtitleEdit.Logic.Download;
 using Nikse.SubtitleEdit.Logic.VideoPlayers.Ffmpeg;
+using System.Runtime.InteropServices;
 
 namespace UITests.Logic.Download;
 
@@ -14,6 +15,19 @@ public class FfmpegLibsDownloadServiceTests
         Assert.EndsWith("-" + FfmpegLibraries.MajorVersion + ".zip", FfmpegLibsDownloadService.WindowsX64AssetName);
         Assert.Equal(64, FfmpegLibsDownloadService.WindowsX64Sha256.Length);
         Assert.Matches("^[0-9a-f]{64}$", FfmpegLibsDownloadService.WindowsX64Sha256);
+    }
+
+    [Theory]
+    [InlineData(true, Architecture.X64, true)]
+    [InlineData(true, Architecture.Arm64, false)]
+    [InlineData(true, Architecture.X86, false)]
+    [InlineData(false, Architecture.X64, false)]
+    public void IsDownloadSupported_MatchesPublishedWindowsX64Capability(
+        bool isWindows,
+        Architecture architecture,
+        bool expected)
+    {
+        Assert.Equal(expected, FfmpegLibsDownloadService.IsDownloadSupported(isWindows, architecture));
     }
 
     [Fact]
