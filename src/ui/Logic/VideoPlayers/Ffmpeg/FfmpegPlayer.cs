@@ -405,6 +405,11 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             or AVSampleFormat.AV_SAMPLE_FMT_S64P;
     }
 
+    internal static bool ShouldRetryDecoderOpenInSoftware(int openResult, bool hardwareRequested, bool hardwareAttached)
+    {
+        return openResult < 0 && hardwareRequested && hardwareAttached;
+    }
+
     private static double TimestampToSeconds(long timestamp, AVRational timeBase)
     {
         return timestamp == ffmpeg.AV_NOPTS_VALUE ? double.NaN : timestamp * ffmpeg.av_q2d(timeBase);
@@ -1340,8 +1345,19 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             result = ffmpeg.avcodec_open2(codec, decoder, null);
             if (result < 0)
             {
+                var hardwareAttached = codec->hw_device_ctx != null;
+                var retryInSoftware = ShouldRetryDecoderOpenInSoftware(result, hardware, hardwareAttached);
+                var hardwareName = retryInSoftware ? HardwareDeviceName(codec) : string.Empty;
+                var errorText = FfmpegLibraries.ErrorText(result);
                 ffmpeg.avcodec_free_context(&codec);
-                throw new InvalidOperationException($"avcodec_open2: {FfmpegLibraries.ErrorText(result)}");
+
+                if (retryInSoftware)
+                {
+                    Se.LogError($"ffmpeg player: {hardwareName} decoder open failed for {ffmpeg.avcodec_get_name(stream->codecpar->codec_id)} ({errorText}), falling back to software");
+                    return OpenDecoder(stream, hardware: false);
+                }
+
+                throw new InvalidOperationException($"avcodec_open2: {errorText}");
             }
 
             return codec;
