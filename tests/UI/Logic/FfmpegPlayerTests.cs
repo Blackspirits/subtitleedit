@@ -15,6 +15,15 @@ namespace UITests.Logic;
 public class FfmpegPlayerTests
 {
     [Fact]
+    public void LetterboxPreview_DefaultsToAuxiliaryOff()
+    {
+        using var player = new FfmpegPlayer();
+        var control = new FfmpegSoftwareControl(player);
+
+        Assert.False(control.IsMainPreviewPlayer);
+    }
+
+    [Fact]
     public void FitRect_WiderControl_LetterboxesHorizontally()
     {
         var rect = FfmpegSoftwareControl.FitRect(new Rect(0, 0, 1000, 500), 16 / 9.0);
