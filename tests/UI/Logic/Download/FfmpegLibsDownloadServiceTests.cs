@@ -1,4 +1,5 @@
 using Nikse.SubtitleEdit.Logic.Download;
+using Nikse.SubtitleEdit.Logic.VideoPlayers.Ffmpeg;
 
 namespace UITests.Logic.Download;
 
@@ -7,9 +8,10 @@ public class FfmpegLibsDownloadServiceTests
     [Fact]
     public void WindowsArchive_IsPinnedToReviewedAutobuildAndDigest()
     {
-        Assert.DoesNotContain("/releases/download/latest/", FfmpegLibsDownloadService.WindowsX64Url, StringComparison.Ordinal);
-        Assert.Contains(FfmpegLibsDownloadService.WindowsX64ReleaseTag, FfmpegLibsDownloadService.WindowsX64Url, StringComparison.Ordinal);
-        Assert.EndsWith("/" + FfmpegLibsDownloadService.WindowsX64AssetName, FfmpegLibsDownloadService.WindowsX64Url, StringComparison.Ordinal);
+        Assert.DoesNotContain("/releases/download/latest/", FfmpegLibsDownloadService.WindowsX64Url);
+        Assert.Contains(FfmpegLibsDownloadService.WindowsX64ReleaseTag, FfmpegLibsDownloadService.WindowsX64Url);
+        Assert.EndsWith("/" + FfmpegLibsDownloadService.WindowsX64AssetName, FfmpegLibsDownloadService.WindowsX64Url);
+        Assert.EndsWith("-" + FfmpegLibraries.MajorVersion + ".zip", FfmpegLibsDownloadService.WindowsX64AssetName);
         Assert.Equal(64, FfmpegLibsDownloadService.WindowsX64Sha256.Length);
         Assert.Matches("^[0-9a-f]{64}$", FfmpegLibsDownloadService.WindowsX64Sha256);
     }
