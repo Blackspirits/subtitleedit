@@ -168,6 +168,21 @@ public class FfmpegPlayerTests
     }
 
     [Fact]
+    public void AudioSinkResetFence_PublishesSerialOnlyAfterSuccessfulNativeReset()
+    {
+        Assert.Equal(7, AudioSinkResetFence.SerialAfterReset(7, succeeded: true));
+        Assert.Equal(AudioSinkResetFence.RejectedSerial, AudioSinkResetFence.SerialAfterReset(7, succeeded: false));
+    }
+
+    [Fact]
+    public void AudioWriteCanAnchor_RequiresAcceptedCurrentSerial()
+    {
+        Assert.True(FfmpegPlayer.AudioWriteCanAnchor(writeAccepted: true, serial: 4, currentSerial: 4));
+        Assert.False(FfmpegPlayer.AudioWriteCanAnchor(writeAccepted: false, serial: 4, currentSerial: 4));
+        Assert.False(FfmpegPlayer.AudioWriteCanAnchor(writeAccepted: true, serial: 4, currentSerial: 5));
+    }
+
+    [Fact]
     public void ExtractLibraries_TakesOnlyBinDlls_Flattened()
     {
         var folder = Path.Combine(Path.GetTempPath(), "se-ffmpeg-libs-" + Guid.NewGuid().ToString("N"));

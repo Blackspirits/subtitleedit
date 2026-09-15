@@ -405,6 +405,11 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             or AVSampleFormat.AV_SAMPLE_FMT_S64P;
     }
 
+    internal static bool AudioWriteCanAnchor(bool writeAccepted, int serial, int currentSerial)
+    {
+        return writeAccepted && serial == currentSerial;
+    }
+
     private static double TimestampToSeconds(long timestamp, AVRational timeBase)
     {
         return timestamp == ffmpeg.AV_NOPTS_VALUE ? double.NaN : timestamp * ffmpeg.av_q2d(timeBase);
@@ -1544,13 +1549,19 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                         var bytes = written * OutputChannels * 2;
                         ApplyGain(pcm, bytes, _gain);
 
+                        var writeAccepted = _audioSink.Write(new ReadOnlySpan<byte>(pcm, 0, bytes), serial);
+                        if (!writeAccepted)
+                        {
+                            break; // reset, device failure, seek or close while waiting for room
+                        }
+
                         if (!anchored)
                         {
                             lock (_seekLock)
                             {
-                                if (serial != _currentSerial)
+                                if (!AudioWriteCanAnchor(writeAccepted, serial, _currentSerial))
                                 {
-                                    break; // a newer seek is on its way - do not anchor to stale audio
+                                    break; // a newer seek landed after this chunk was accepted
                                 }
 
                                 _audioAnchorPts = samplePts;
@@ -1558,7 +1569,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                                 _audioSpeed = speed;
                                 if (!_hasVideo && serial > _restartSerial)
                                 {
-                                    // No picture will ever land this seek - the first audio does.
+                                    // No picture will ever land this seek - the first accepted audio does.
                                     _restartSerial = serial;
                                     if (!_playing)
                                     {
@@ -1570,11 +1581,6 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                             }
 
                             anchored = true;
-                        }
-
-                        if (!_audioSink.Write(new ReadOnlySpan<byte>(pcm, 0, bytes), serial))
-                        {
-                            break; // reset (seek) or closed while waiting for room
                         }
                     }
                 }
