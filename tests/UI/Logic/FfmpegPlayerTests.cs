@@ -273,6 +273,30 @@ public class FfmpegPlayerTests
     }
 
     [Theory]
+    [InlineData(4, 4, 7, -1)]
+    [InlineData(4, 5, 9, 9)]
+    public void FailedSeekAudioStreamState_RollsBackOnlyTheFailedLatestRequest(
+        int failedSerial,
+        int requestedSerial,
+        int requestedAudioStreamIndex,
+        int expected)
+    {
+        Assert.Equal(expected, FfmpegPlayer.FailedSeekAudioStreamState(
+            failedSerial,
+            requestedSerial,
+            requestedAudioStreamIndex));
+    }
+
+    [Fact]
+    public void NextAudioStreamIndex_UsesPendingSelectionForRapidToggles()
+    {
+        var streams = new[] { 2, 5, 8 };
+
+        Assert.Equal(8, FfmpegPlayer.NextAudioStreamIndex(streams, committedAudioStreamIndex: 5, requestedAudioStreamIndex: -1));
+        Assert.Equal(2, FfmpegPlayer.NextAudioStreamIndex(streams, committedAudioStreamIndex: 5, requestedAudioStreamIndex: 8));
+    }
+
+    [Theory]
     [InlineData(false, true, 60.0, 60.0, true)]
     [InlineData(false, false, 60.0, 60.0, true)]
     [InlineData(false, false, 0.0, 60.0, false)]
