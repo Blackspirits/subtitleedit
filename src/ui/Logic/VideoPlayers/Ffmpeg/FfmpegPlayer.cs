@@ -913,6 +913,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             var swsSourceFormat = AVPixelFormat.AV_PIX_FMT_NONE;
             var outputWidth = 0;
             var outputHeight = 0;
+            VideoFrame? lastDropped = null; // detached from the queue while seeking; return it on every exit
 
             try
             {
@@ -931,7 +932,6 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 var serial = -1;
                 var dropUntil = -1.0;
                 var presentedForSerial = false;
-                VideoFrame? lastDropped = null; // kept so a target past the last picture still shows something
 
                 while (!_closing)
                 {
@@ -1103,6 +1103,8 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             }
             finally
             {
+                _videoFrames.Return(lastDropped);
+
                 if (sws != null)
                 {
                     ffmpeg.sws_freeContext(sws);
