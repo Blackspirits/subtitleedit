@@ -876,6 +876,10 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 System.Diagnostics.Debug.WriteLine($"ffmpeg seek failed: {FfmpegLibraries.ErrorText(result)}");
             }
 
+            // Fence the sink first. Any old-serial writer that was already in flight is aborted
+            // by the sink generation; any one that starts after this point is rejected by serial.
+            _audioSink.Reset(serial);
+
             lock (_seekLock)
             {
                 _currentSerial = serial;
@@ -896,7 +900,6 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             _videoPackets.Flush(serial, target);
             _audioPackets.Flush(serial, target);
             _videoFrames.Flush();
-            _audioSink.Reset();
             _presentWake.Set();
         }
 
@@ -1569,7 +1572,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                             anchored = true;
                         }
 
-                        if (!_audioSink.Write(new ReadOnlySpan<byte>(pcm, 0, bytes)))
+                        if (!_audioSink.Write(new ReadOnlySpan<byte>(pcm, 0, bytes), serial))
                         {
                             break; // reset (seek) or closed while waiting for room
                         }
@@ -1830,7 +1833,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             {
                 try
                 {
-                    audioSink.Reset();
+                    audioSink.Reset(int.MinValue);
                 }
                 catch
                 {

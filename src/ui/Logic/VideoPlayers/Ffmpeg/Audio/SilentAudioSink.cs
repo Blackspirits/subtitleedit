@@ -13,11 +13,13 @@ public sealed class SilentAudioSink : IAudioSink
 {
     private readonly Stopwatch _clock = new();
     private readonly ManualResetEventSlim _wake = new(false);
+    private readonly Lock _lock = new();
     private int _bytesPerSecond = 48000 * 2 * 2;
     private long _bytesWritten;
     private volatile bool _disposed;
     private volatile bool _paused;
     private int _generation;
+    private int _serial;
 
     /// <summary>How far ahead of the clock a write may run before it blocks.</summary>
     private const double LeadSeconds = 0.2;
@@ -25,23 +27,38 @@ public sealed class SilentAudioSink : IAudioSink
     public void Open(int sampleRate, int channels)
     {
         _bytesPerSecond = Math.Max(1, sampleRate * channels * 2);
-        Reset();
+        Reset(0);
     }
 
     public double PlayedSeconds => Math.Min(_clock.Elapsed.TotalSeconds, Interlocked.Read(ref _bytesWritten) / (double)_bytesPerSecond);
 
-    public bool Write(ReadOnlySpan<byte> pcm)
+    public bool Write(ReadOnlySpan<byte> pcm, int serial)
     {
         var generation = Volatile.Read(ref _generation);
+        if (serial != Volatile.Read(ref _serial))
+        {
+            return false;
+        }
+
         var seconds = pcm.Length / (double)_bytesPerSecond;
-        while (!_disposed && generation == Volatile.Read(ref _generation))
+        while (!_disposed &&
+               generation == Volatile.Read(ref _generation) &&
+               serial == Volatile.Read(ref _serial))
         {
             var ahead = Interlocked.Read(ref _bytesWritten) / (double)_bytesPerSecond - _clock.Elapsed.TotalSeconds;
             // Take the chunk when the clock is starved, or when it still fits within the lead.
             if (ahead <= 0 || ahead + seconds <= LeadSeconds)
             {
-                Interlocked.Add(ref _bytesWritten, pcm.Length);
-                return true;
+                lock (_lock)
+                {
+                    if (_disposed || generation != _generation || serial != _serial)
+                    {
+                        return false;
+                    }
+
+                    Interlocked.Add(ref _bytesWritten, pcm.Length);
+                    return true;
+                }
             }
 
             // Sleep until enough has drained for this chunk to fit (never a negative wait).
@@ -53,14 +70,18 @@ public sealed class SilentAudioSink : IAudioSink
         return false;
     }
 
-    public void Reset()
+    public void Reset(int serial)
     {
-        Interlocked.Increment(ref _generation);
-        Interlocked.Exchange(ref _bytesWritten, 0);
-        _clock.Reset();
-        if (!_paused)
+        lock (_lock)
         {
-            _clock.Start();
+            Interlocked.Increment(ref _generation);
+            Volatile.Write(ref _serial, serial);
+            Interlocked.Exchange(ref _bytesWritten, 0);
+            _clock.Reset();
+            if (!_paused)
+            {
+                _clock.Start();
+            }
         }
 
         _wake.Set();
