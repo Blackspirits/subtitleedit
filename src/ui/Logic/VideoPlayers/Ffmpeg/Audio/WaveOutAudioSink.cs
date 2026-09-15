@@ -1,3 +1,4 @@
+using Nikse.SubtitleEdit.Logic.Config;
 using System;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
@@ -267,13 +268,21 @@ public sealed unsafe partial class WaveOutAudioSink : IAudioSink
         lock (_lock)
         {
             Interlocked.Increment(ref _generation);
-            Volatile.Write(ref _serial, serial);
+            Volatile.Write(ref _serial, AudioSinkResetFence.RejectedSerial);
             if (_device == IntPtr.Zero)
             {
                 return;
             }
 
-            waveOutReset(_device); // returns every queued buffer with WHDR_DONE set
+            var resetResult = waveOutReset(_device);
+            if (resetResult != MmSysErrNoError)
+            {
+                // Only a successful reset guarantees that queued headers were returned. Keep the
+                // serial fenced and leave header ownership untouched rather than recycling memory
+                // the driver may still be using.
+                Se.LogError($"ffmpeg player: waveOutReset failed with error {resetResult}; audio writes remain fenced");
+                return;
+            }
 
             // Drivers differ on whether waveOutReset rewinds the position counter; forget the
             // wrap-around history first so a rewind to 0 is not mistaken for a 32-bit wrap.
@@ -285,6 +294,7 @@ public sealed unsafe partial class WaveOutAudioSink : IAudioSink
                 ((WaveHdr*)_headers + i)->dwFlags |= WhdrDone;
             }
 
+            Volatile.Write(ref _serial, AudioSinkResetFence.SerialAfterReset(serial, succeeded: true));
             if (_paused)
             {
                 waveOutPause(_device); // waveOutReset implicitly restarts a paused device

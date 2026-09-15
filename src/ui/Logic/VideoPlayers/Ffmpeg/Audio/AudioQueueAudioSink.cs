@@ -1,3 +1,4 @@
+using Nikse.SubtitleEdit.Logic.Config;
 using System;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
@@ -310,7 +311,7 @@ public sealed unsafe partial class AudioQueueAudioSink : IAudioSink
         lock (_lock)
         {
             Interlocked.Increment(ref _generation);
-            Volatile.Write(ref _serial, serial);
+            Volatile.Write(ref _serial, AudioSinkResetFence.RejectedSerial);
             _resetting = true;
             queue = _queue;
         }
@@ -328,12 +329,23 @@ public sealed unsafe partial class AudioQueueAudioSink : IAudioSink
 
         // Drops the queued buffers and returns them through the callback, which may run
         // synchronously on the queue thread - so this must not hold _lock.
-        AudioQueueReset(queue);
+        var resetResult = AudioQueueReset(queue);
 
         lock (_lock)
         {
             if (_queue != queue)
             {
+                _resetting = false;
+                _doneEvent.Set();
+                return;
+            }
+
+            if (resetResult != 0)
+            {
+                // A failed reset does not guarantee that scheduled buffers were removed. Do not
+                // mark them free or accept the new serial; callbacks may still return individual
+                // buffers normally, but new PCM remains fenced.
+                Se.LogError($"ffmpeg player: AudioQueueReset failed with error {resetResult}; audio writes remain fenced");
                 _resetting = false;
                 _doneEvent.Set();
                 return;
@@ -348,6 +360,7 @@ public sealed unsafe partial class AudioQueueAudioSink : IAudioSink
             _nextBuffer = 0;
             _bytesWritten = 0;
             _sampleBase = CurrentSampleTime();
+            Volatile.Write(ref _serial, AudioSinkResetFence.SerialAfterReset(serial, succeeded: true));
             _resetting = false;
             _doneEvent.Set();
         }

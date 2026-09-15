@@ -33,3 +33,13 @@ public interface IAudioSink : IDisposable
     void Pause();
     void Resume();
 }
+
+internal static class AudioSinkResetFence
+{
+    internal const int RejectedSerial = int.MinValue;
+
+    internal static int SerialAfterReset(int requestedSerial, bool succeeded)
+    {
+        return succeeded ? requestedSerial : RejectedSerial;
+    }
+}
