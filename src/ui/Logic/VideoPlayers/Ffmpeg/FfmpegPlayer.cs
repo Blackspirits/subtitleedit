@@ -405,6 +405,15 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             or AVSampleFormat.AV_SAMPLE_FMT_S64P;
     }
 
+    /// <summary>
+    /// avcodec_send_packet(EAGAIN) means the decoder rejected the input. The same packet may be
+    /// resent only after receive_frame made progress, and only while the serial is still current.
+    /// </summary>
+    internal static bool ShouldResendPacket(int sendResult, bool receivedOutput, bool interrupted)
+    {
+        return sendResult == -ffmpeg.EAGAIN && receivedOutput && !interrupted;
+    }
+
     private static double TimestampToSeconds(long timestamp, AVRational timeBase)
     {
         return timestamp == ffmpeg.AV_NOPTS_VALUE ? double.NaN : timestamp * ffmpeg.av_q2d(timeBase);
@@ -951,13 +960,15 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                     }
 
                     var packet = entry.Packet;
+                retryVideoPacket:
                     var sendResult = ffmpeg.avcodec_send_packet(codec, packet); // null = drain at end of stream
-                    if (packet != null)
+                    var packetRejected = sendResult == -ffmpeg.EAGAIN;
+                    if (!packetRejected && packet != null)
                     {
                         ffmpeg.av_packet_free(&packet);
                     }
 
-                    if (sendResult < 0 && sendResult != -ffmpeg.EAGAIN && sendResult != ffmpeg.AVERROR_EOF)
+                    if (sendResult < 0 && !packetRejected && sendResult != ffmpeg.AVERROR_EOF)
                     {
                         if (hardware)
                         {
@@ -970,6 +981,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                     }
 
                     var hardwareFailed = false;
+                    var receivedOutput = false;
                     while (!_closing)
                     {
                         var receiveResult = ffmpeg.avcodec_receive_frame(codec, frame);
@@ -979,6 +991,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                             break;
                         }
 
+                        receivedOutput = true;
                         var picture = frame;
                         if (frame->hw_frames_ctx != null)
                         {
@@ -1062,6 +1075,24 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                         presentedForSerial = true;
                         _videoFrames.Push(converted);
                         _presentWake.Set();
+                    }
+
+                    var interrupted = _closing || SeekRequestedSince(serial);
+                    if (!hardwareFailed && ShouldResendPacket(sendResult, receivedOutput, interrupted))
+                    {
+                        goto retryVideoPacket;
+                    }
+
+                    if (packetRejected && !interrupted && !receivedOutput && !hardwareFailed)
+                    {
+                        // The API guarantees send/receive cannot both be EAGAIN. Avoid a spin if a
+                        // decoder violates that state machine.
+                        Se.LogError("ffmpeg player: decoder returned EAGAIN without output; dropping rejected video packet");
+                    }
+
+                    if (packet != null)
+                    {
+                        ffmpeg.av_packet_free(&packet);
                     }
 
                     if (hardwareFailed)
@@ -1412,17 +1443,20 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                         }
                     }
 
+                retryAudioPacket:
                     var sendResult = ffmpeg.avcodec_send_packet(codec, packet);
-                    if (packet != null)
+                    var packetRejected = sendResult == -ffmpeg.EAGAIN;
+                    if (!packetRejected && packet != null)
                     {
                         ffmpeg.av_packet_free(&packet);
                     }
 
-                    if (sendResult < 0 && sendResult != -ffmpeg.EAGAIN && sendResult != ffmpeg.AVERROR_EOF)
+                    if (sendResult < 0 && !packetRejected && sendResult != ffmpeg.AVERROR_EOF)
                     {
                         continue;
                     }
 
+                    var receivedOutput = false;
                     while (!_closing)
                     {
                         var receiveResult = ffmpeg.avcodec_receive_frame(codec, frame);
@@ -1431,6 +1465,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                             break;
                         }
 
+                        receivedOutput = true;
                         var pts = TimestampToSeconds(frame->best_effort_timestamp, timeBase);
                         if (double.IsNaN(pts))
                         {
@@ -1573,6 +1608,22 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                         {
                             break; // reset (seek) or closed while waiting for room
                         }
+                    }
+
+                    var interrupted = _closing || SeekRequestedSince(serial);
+                    if (ShouldResendPacket(sendResult, receivedOutput, interrupted))
+                    {
+                        goto retryAudioPacket;
+                    }
+
+                    if (packetRejected && !interrupted && !receivedOutput)
+                    {
+                        Se.LogError("ffmpeg player: decoder returned EAGAIN without output; dropping rejected audio packet");
+                    }
+
+                    if (packet != null)
+                    {
+                        ffmpeg.av_packet_free(&packet);
                     }
                 }
             }
