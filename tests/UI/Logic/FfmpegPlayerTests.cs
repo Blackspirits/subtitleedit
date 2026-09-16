@@ -106,6 +106,14 @@ public class FfmpegPlayerTests
         queue.Close();
     }
 
+    [Theory]
+    [InlineData(7, 7, true)]
+    [InlineData(7, 8, false)]
+    public void CanPublishVideoFrame_RequiresCurrentSeekSerial(int frameSerial, int currentSerial, bool expected)
+    {
+        Assert.Equal(expected, FfmpegPlayer.CanPublishVideoFrame(frameSerial, currentSerial));
+    }
+
     [Fact]
     public void VideoFrameQueue_SizeChange_DropsOldPool()
     {
@@ -277,6 +285,73 @@ public class FfmpegPlayerTests
         Assert.Equal(
             expected,
             FfmpegPlayer.ShouldDropPacketBeforeHardwareReplay(packetSerial, minimumReplaySerial));
+    }
+
+    [Fact]
+    public void FailedSeekState_LatestRequestRollsBackToCommittedPipeline()
+    {
+        var state = FfmpegPlayer.FailedSeekState(
+            failedSerial: 4,
+            currentSerial: 3,
+            requestedSerial: 4,
+            requestedTarget: 42.0,
+            currentPosition: 12.5);
+
+        Assert.Equal(3, state.RequestedSerial);
+        Assert.Equal(12.5, state.RequestedTarget);
+    }
+
+    [Fact]
+    public void FailedSeekState_StaleFailureDoesNotEraseNewerRequest()
+    {
+        var state = FfmpegPlayer.FailedSeekState(
+            failedSerial: 4,
+            currentSerial: 3,
+            requestedSerial: 5,
+            requestedTarget: 55.0,
+            currentPosition: 12.5);
+
+        Assert.Equal(5, state.RequestedSerial);
+        Assert.Equal(55.0, state.RequestedTarget);
+    }
+
+    [Theory]
+    [InlineData(false, true, 60.0, 60.0, true)]
+    [InlineData(false, false, 60.0, 60.0, true)]
+    [InlineData(false, false, 0.0, 60.0, false)]
+    [InlineData(true, true, 60.0, 60.0, false)]
+    [InlineData(true, false, 60.0, 60.0, false)]
+    public void ShouldAutoRewindOnPlay_DoesNotOverwriteOutstandingSeek(
+        bool hasOutstandingSeek,
+        bool endReached,
+        double duration,
+        double position,
+        bool expected)
+    {
+        Assert.Equal(expected, FfmpegPlayer.ShouldAutoRewindOnPlay(
+            hasOutstandingSeek,
+            endReached,
+            duration,
+            position));
+    }
+
+    [Theory]
+    [InlineData(true, false, 60.0, 60.0, true)]
+    [InlineData(true, true, 60.0, 60.0, false)]
+    [InlineData(false, false, 60.0, 60.0, false)]
+    [InlineData(true, false, 0.0, 60.0, false)]
+    public void ShouldReachAudioOnlyEnd_WaitsForOutstandingSeek(
+        bool playing,
+        bool hasOutstandingSeek,
+        double duration,
+        double position,
+        bool expected)
+    {
+        Assert.Equal(expected, FfmpegPlayer.ShouldReachAudioOnlyEnd(
+            playing,
+            hasOutstandingSeek,
+            duration,
+            position));
     }
 
     [Theory]
