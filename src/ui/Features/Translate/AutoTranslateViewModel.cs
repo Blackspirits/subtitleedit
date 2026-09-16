@@ -2457,8 +2457,11 @@ public partial class AutoTranslateViewModel : ObservableObject
         // language, so it opened on German instead (#14926). The last source is a better guess.
         if (string.IsNullOrEmpty(defaultSourceLanguageCode))
         {
+            // The saved source belongs to the previously used engine. Its identifier may use a
+            // different convention (for example NLLB "eng_Latn" versus Google "en" or an LLM
+            // engine's "English"), so resolve it against the *current* engine before returning it.
             var lastSource = Se.Settings.AutoTranslate.AutoTranslateLastSource;
-            return string.IsNullOrEmpty(lastSource) ? "en" : lastSource;
+            return FindLanguage(sourceLanguages, lastSource)?.Code ?? "en";
         }
 
         if (!string.IsNullOrEmpty(Se.Settings.AutoTranslate.AutoTranslateLastSource) &&
@@ -2523,13 +2526,76 @@ public partial class AutoTranslateViewModel : ObservableObject
             return null;
         }
 
+        var direct = languages.FirstOrDefault(p => codeOrName.Equals(p.Code, StringComparison.OrdinalIgnoreCase))
+                     ?? languages.FirstOrDefault(p => codeOrName.Equals(p.Name, StringComparison.OrdinalIgnoreCase))
+                     ?? languages.FirstOrDefault(p => codeOrName.Equals(p.TwoLetterIsoLanguageName, StringComparison.OrdinalIgnoreCase));
+        if (direct != null)
+        {
+            return direct;
+        }
+
+        // Providers disagree on the separator used by script-qualified identifiers:
+        // NLLB uses "zho_Hans", while another engine may expose the same identifier as
+        // "zho-Hans". Treat those spellings as the same before falling back to ISO mapping.
+        var normalized = NormalizeLanguageIdentifier(codeOrName);
+        var normalizedMatch = languages.FirstOrDefault(p =>
+                                  normalized.Equals(NormalizeLanguageIdentifier(p.Code), StringComparison.OrdinalIgnoreCase))
+                              ?? languages.FirstOrDefault(p =>
+                                  normalized.Equals(NormalizeLanguageIdentifier(p.TwoLetterIsoLanguageName), StringComparison.OrdinalIgnoreCase));
+        if (normalizedMatch != null)
+        {
+            return normalizedMatch;
+        }
+
         var englishName = Iso639Dash2LanguageCode.List
             .FirstOrDefault(l => l.TwoLetterCode.Equals(codeOrName, StringComparison.OrdinalIgnoreCase))?.EnglishName;
+        if (englishName != null)
+        {
+            var byEnglishName = languages.FirstOrDefault(p => englishName.Equals(p.Name, StringComparison.OrdinalIgnoreCase));
+            if (byEnglishName != null)
+            {
+                return byEnglishName;
+            }
+        }
 
-        return languages.FirstOrDefault(p => codeOrName.Equals(p.Code, StringComparison.OrdinalIgnoreCase))
-               ?? languages.FirstOrDefault(p => codeOrName.Equals(p.Name, StringComparison.OrdinalIgnoreCase))
-               ?? languages.FirstOrDefault(p => codeOrName.Equals(p.TwoLetterIsoLanguageName, StringComparison.OrdinalIgnoreCase))
-               ?? (englishName == null ? null : languages.FirstOrDefault(p => englishName.Equals(p.Name, StringComparison.OrdinalIgnoreCase)));
+        // NLLB-style identifiers start with ISO-639-3 (eng_Latn, deu_Latn, ...). Convert that
+        // prefix to ISO-639-1, then prefer an exact English-name match. If the current engine has
+        // several variants sharing the same two-letter code and no exact name (e.g. Chinese
+        // variants), fail closed instead of silently selecting the first one.
+        var separatorIndex = normalized.IndexOf('-');
+        var threeLetter = separatorIndex > 0 ? normalized[..separatorIndex] : normalized;
+        if (threeLetter.Length != 3)
+        {
+            return null;
+        }
+
+        var twoLetter = Iso639Dash2LanguageCode.GetTwoLetterCodeFromThreeLetterCode(threeLetter);
+        if (string.IsNullOrEmpty(twoLetter))
+        {
+            return null;
+        }
+
+        englishName = Iso639Dash2LanguageCode.List
+            .FirstOrDefault(l => l.TwoLetterCode.Equals(twoLetter, StringComparison.OrdinalIgnoreCase))?.EnglishName;
+        if (englishName != null)
+        {
+            var byEnglishName = languages.FirstOrDefault(p => englishName.Equals(p.Name, StringComparison.OrdinalIgnoreCase));
+            if (byEnglishName != null)
+            {
+                return byEnglishName;
+            }
+        }
+
+        var matches = languages
+            .Where(p => twoLetter.Equals(p.TwoLetterIsoLanguageName, StringComparison.OrdinalIgnoreCase))
+            .Take(2)
+            .ToList();
+        return matches.Count == 1 ? matches[0] : null;
+    }
+
+    private static string NormalizeLanguageIdentifier(string? value)
+    {
+        return (value ?? string.Empty).Trim().Replace('_', '-');
     }
 
     private static bool IsSameLanguage(TranslationPair language, TranslationPair? other)
