@@ -233,7 +233,7 @@ public class MossTtsCrispAsr : ITtsEngine, IPerLineCloneEngine
 
     public static string GetSetModelsFolder()
     {
-        var modelsFolder = Path.Combine(Se.CrispAsrFolder, "models");
+        var modelsFolder = Se.CrispAsrModelsFolder;
         if (!Directory.Exists(modelsFolder))
         {
             Directory.CreateDirectory(modelsFolder);
@@ -344,8 +344,7 @@ public class MossTtsCrispAsr : ITtsEngine, IPerLineCloneEngine
     public static string GetCodecPath() =>
         Path.Combine(GetSetModelsFolder(), CodecFileName);
 
-    public static string GetCrispAsrCacheFolder() =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "crispasr");
+    public static string GetCrispAsrCacheFolder() => CrispAsrEngineBase.AutoDownloadModelsFolder;
 
     public static bool TrySeedModelFromCrispAsrCache(string fileName, string destinationPath)
     {
@@ -776,7 +775,8 @@ public class MossTtsCrispAsr : ITtsEngine, IPerLineCloneEngine
                 }
             }
 
-            var process = Process.Start(psi)
+            CrispAsrEngineBase.ConfigureModelEnvironment(psi);
+        var process = Process.Start(psi)
                 ?? throw new InvalidOperationException("Failed to start crispasr (moss-tts)");
 
             var launchCommand = FormatLaunchCommand(exe, psi.ArgumentList);

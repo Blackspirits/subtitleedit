@@ -176,7 +176,7 @@ public class HiggsTtsAudioCpp : ITtsEngine, IPerLineCloneEngine
     /// </summary>
     public static string GetSetModelsFolder()
     {
-        var folder = Path.Combine(AudioCppRuntime.GetSetEngineFolder(), "models", "Higgs-Audio-v3-TTS-4B-GGUF");
+        var folder = Path.Combine(Se.AudioCppModelsFolder, "Higgs-Audio-v3-TTS-4B-GGUF");
         if (!Directory.Exists(folder))
         {
             Directory.CreateDirectory(folder);

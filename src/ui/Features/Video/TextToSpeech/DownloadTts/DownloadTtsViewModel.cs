@@ -2451,7 +2451,7 @@ public partial class DownloadTtsViewModel : ObservableObject
     {
         TitleText = string.Format(Se.Language.General.DownloadingX, $"voice: {piperVoice.Voice}");
 
-        var folder = Piper.GetSetPiperFolder();
+        var folder = Piper.GetSetModelsFolder();
         _modelFileName = Path.Combine(folder, piperVoice.ModelShort);
         _configFileName = Path.Combine(folder, piperVoice.ConfigShort);
 
