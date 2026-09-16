@@ -122,6 +122,8 @@ public sealed unsafe partial class AudioQueueAudioSink : IAudioSink
     private double _sampleBase;
     private double _lastSampleTime;
     private long _bytesWritten;
+    private bool _clockBaselineValid = true;
+    private int _clockReadFailures;
 
     public void Open(int sampleRate, int channels)
     {
@@ -176,6 +178,8 @@ public sealed unsafe partial class AudioQueueAudioSink : IAudioSink
             _sampleBase = 0;
             _lastSampleTime = 0;
             _bytesWritten = 0;
+            _clockBaselineValid = true;
+            _clockReadFailures = 0;
         }
     }
 
@@ -214,16 +218,35 @@ public sealed unsafe partial class AudioQueueAudioSink : IAudioSink
     {
         get
         {
-            lock (_lock)
-            {
-                if (_queue == IntPtr.Zero || _bytesPerSecond == 0)
-                {
-                    return 0;
-                }
+            TryGetPlayedSeconds(out var playedSeconds);
+            return playedSeconds;
+        }
+    }
 
-                var played = Math.Max(0, CurrentSampleTime() - _sampleBase) * _blockAlign;
-                return Math.Min(played, _bytesWritten) / _bytesPerSecond;
+    public bool TryGetPlayedSeconds(out double playedSeconds)
+    {
+        lock (_lock)
+        {
+            if (_queue == IntPtr.Zero || _bytesPerSecond == 0)
+            {
+                playedSeconds = 0;
+                return false;
             }
+
+            if (!_clockBaselineValid)
+            {
+                // A failed post-reset sample-time read leaves no trustworthy delta for this
+                // serial. Report zero played time and let the player leave the device clock;
+                // a later Reset can establish a fresh baseline.
+                playedSeconds = 0;
+                return false;
+            }
+
+            var readSucceeded = TryCurrentSampleTime(out var sampleTime);
+            _clockReadFailures = AudioSinkClockHealth.NextFailureCount(_clockReadFailures, readSucceeded);
+            var played = Math.Max(0, sampleTime - _sampleBase) * _blockAlign;
+            playedSeconds = Math.Min(played, _bytesWritten) / _bytesPerSecond;
+            return AudioSinkClockHealth.IsHealthy(baselineValid: true, _clockReadFailures);
         }
     }
 
@@ -240,18 +263,28 @@ public sealed unsafe partial class AudioQueueAudioSink : IAudioSink
     /// <summary>Queue clock in sample frames; the last known value when the queue is not running.</summary>
     private double CurrentSampleTime()
     {
+        var readSucceeded = TryCurrentSampleTime(out var sampleTime);
+        _clockReadFailures = AudioSinkClockHealth.NextFailureCount(_clockReadFailures, readSucceeded);
+        return sampleTime;
+    }
+
+    private bool TryCurrentSampleTime(out double sampleTime)
+    {
+        sampleTime = _lastSampleTime;
         if (!_started)
         {
-            return _lastSampleTime;
+            return true;
         }
 
         var result = AudioQueueGetCurrentTime(_queue, IntPtr.Zero, out var time, IntPtr.Zero);
-        if (result == 0 && !double.IsNaN(time.mSampleTime))
+        if (result != 0 || !double.IsFinite(time.mSampleTime))
         {
-            _lastSampleTime = time.mSampleTime;
+            return false;
         }
 
-        return _lastSampleTime;
+        _lastSampleTime = time.mSampleTime;
+        sampleTime = _lastSampleTime;
+        return true;
     }
 
     public bool Write(ReadOnlySpan<byte> pcm, int serial)
@@ -375,7 +408,8 @@ public sealed unsafe partial class AudioQueueAudioSink : IAudioSink
             _inFlight = 0;
             _nextBuffer = 0;
             _bytesWritten = 0;
-            _sampleBase = CurrentSampleTime();
+            _clockReadFailures = 0;
+            _clockBaselineValid = TryCurrentSampleTime(out _sampleBase);
             _startFailed = false;
             Volatile.Write(ref _serial, AudioSinkResetFence.SerialAfterReset(serial, succeeded: true));
             _resetting = false;
