@@ -1,6 +1,7 @@
 ﻿using Avalonia;
 using FFmpeg.AutoGen;
 using Nikse.SubtitleEdit.Features.Shared;
+using Nikse.SubtitleEdit.Logic.Download;
 using Nikse.SubtitleEdit.Logic.VideoPlayers.Ffmpeg;
 using Nikse.SubtitleEdit.Logic.VideoPlayers.Ffmpeg.Audio;
 using System.IO.Compression;
@@ -321,17 +322,26 @@ public class FfmpegPlayerTests
         {
             using (var archive = ZipFile.Open(zip, ZipArchiveMode.Create))
             {
-                AddEntry(archive, "ffmpeg-n9.0-latest-win64-lgpl-shared-9.0/bin/avcodec-63.dll");
-                AddEntry(archive, "ffmpeg-n9.0-latest-win64-lgpl-shared-9.0/bin/ffmpeg.exe");
-                AddEntry(archive, "ffmpeg-n9.0-latest-win64-lgpl-shared-9.0/lib/avcodec.lib");
-                AddEntry(archive, "ffmpeg-n9.0-latest-win64-lgpl-shared-9.0/include/libavcodec/avcodec.h");
+                foreach (var required in FfmpegLibraryInstaller.RequiredWindowsLibraryNames)
+                {
+                    AddEntry(archive, "ffmpeg-n9.0-win64-lgpl-shared/bin/" + required);
+                }
+
+                AddEntry(archive, "ffmpeg-n9.0-win64-lgpl-shared/bin/ffmpeg.exe");
+                AddEntry(archive, "ffmpeg-n9.0-win64-lgpl-shared/lib/avcodec.lib");
+                AddEntry(archive, "ffmpeg-n9.0-win64-lgpl-shared/include/libavcodec/avcodec.h");
             }
 
             DownloadFfmpegLibsViewModel.ExtractLibraries(zip, folder, CancellationToken.None);
 
-            var files = Directory.GetFiles(folder).Select(Path.GetFileName).ToArray();
-            Assert.Single(files);
-            Assert.Equal("avcodec-63.dll", files[0]);
+            var files = Directory.GetFiles(folder)
+                .Select(Path.GetFileName)
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            var expectedFiles = FfmpegLibraryInstaller.RequiredWindowsLibraryNames
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            Assert.Equal(expectedFiles, files);
         }
         finally
         {

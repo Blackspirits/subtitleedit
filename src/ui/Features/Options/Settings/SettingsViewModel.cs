@@ -29,6 +29,7 @@ using Nikse.SubtitleEdit.Features.SpellCheck;
 using Nikse.SubtitleEdit.Features.Video.BurnIn;
 using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.Config;
+using Nikse.SubtitleEdit.Logic.Download;
 using Nikse.SubtitleEdit.Logic.Media;
 using Nikse.SubtitleEdit.Logic.VideoPlayers.LibMpvDynamic;
 using System;
@@ -689,7 +690,7 @@ public partial class SettingsViewModel : ObservableObject
         LibMpvPath = string.Empty;
         IsLibMpvDownloadVisible = OperatingSystem.IsWindows();
         IsLibVlcDownloadVisible = OperatingSystem.IsWindows();
-        IsFfmpegLibsDownloadVisible = OperatingSystem.IsWindows();
+        IsFfmpegLibsDownloadVisible = FfmpegLibsDownloadService.IsDownloadSupportedOnCurrentPlatform();
 
         MpvPreviewFontName = FontNames.First();
         MpvPreviewSelectedBorderType = MpvPreviewBorderTypes.First();
