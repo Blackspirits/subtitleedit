@@ -30,7 +30,22 @@ public sealed class SilentAudioSink : IAudioSink
         Reset(0);
     }
 
-    public double PlayedSeconds => Math.Min(_clock.Elapsed.TotalSeconds, Interlocked.Read(ref _bytesWritten) / (double)_bytesPerSecond);
+    public double PlayedSeconds
+    {
+        get
+        {
+            TryGetPlayedSeconds(out var playedSeconds);
+            return playedSeconds;
+        }
+    }
+
+    public bool TryGetPlayedSeconds(out double playedSeconds)
+    {
+        playedSeconds = Math.Min(
+            _clock.Elapsed.TotalSeconds,
+            Interlocked.Read(ref _bytesWritten) / (double)_bytesPerSecond);
+        return true;
+    }
 
     public bool Write(ReadOnlySpan<byte> pcm, int serial)
     {
