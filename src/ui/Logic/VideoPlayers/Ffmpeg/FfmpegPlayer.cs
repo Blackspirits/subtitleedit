@@ -35,6 +35,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
 
     private const int OutputSampleRate = 48000;
     private const int OutputChannels = 2;
+    private const double OutputBytesPerSecond = OutputSampleRate * OutputChannels * 2.0;
     private const int VideoQueueCapacity = 3;
 
     /// <summary>Pictures wider than this are scaled down during conversion - the preview never shows more, and it keeps the BGRA pool small.</summary>
@@ -304,6 +305,96 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         return duration > 0 ? Math.Min(value, duration) : value;
     }
 
+    internal static double EndPosition(double duration, double observedPosition)
+    {
+        if (double.IsFinite(duration) && duration > 0)
+        {
+            return duration;
+        }
+
+        return double.IsFinite(observedPosition) && observedPosition > 0 ? observedPosition : 0;
+    }
+
+    internal static bool AudioDrainComplete(int eofSerial, int currentSerial, double audioEndPosition, double clock)
+    {
+        if (eofSerial != currentSerial)
+        {
+            return false;
+        }
+
+        return !double.IsFinite(audioEndPosition) || clock >= audioEndPosition - 0.005;
+    }
+
+    /// <summary>
+    /// State visible after a native seek failure. Only the request that actually failed may roll
+    /// back to the committed pipeline serial/position; a newer request that arrived while
+    /// av_seek_frame was blocked must remain pending.
+    /// </summary>
+    internal static (int RequestedSerial, double RequestedTarget) FailedSeekState(
+        int failedSerial,
+        int currentSerial,
+        int requestedSerial,
+        double requestedTarget,
+        double currentPosition)
+    {
+        return requestedSerial == failedSerial
+            ? (currentSerial, currentPosition)
+            : (requestedSerial, requestedTarget);
+    }
+
+    internal static int FailedSeekAudioStreamState(int failedSerial, int requestedSerial, int requestedAudioStreamIndex)
+    {
+        return requestedSerial == failedSerial ? -1 : requestedAudioStreamIndex;
+    }
+
+    internal static int NextAudioStreamIndex(IReadOnlyList<int> streamIndexes, int committedAudioStreamIndex, int requestedAudioStreamIndex)
+    {
+        if (streamIndexes.Count == 0)
+        {
+            return -1;
+        }
+
+        var selected = requestedAudioStreamIndex >= 0 ? requestedAudioStreamIndex : committedAudioStreamIndex;
+        var current = -1;
+        for (var i = 0; i < streamIndexes.Count; i++)
+        {
+            if (streamIndexes[i] == selected)
+            {
+                current = i;
+                break;
+            }
+        }
+
+        return streamIndexes[(current + 1) % streamIndexes.Count];
+    }
+
+    internal static bool ShouldAutoRewindOnPlay(
+        bool hasOutstandingSeek,
+        bool endReached,
+        double duration,
+        double position)
+    {
+        return !hasOutstandingSeek &&
+               (endReached || (duration > 0 && position >= duration - 0.01));
+    }
+
+    internal static bool ShouldReachAudioOnlyEnd(
+        bool playing,
+        bool hasOutstandingSeek,
+        double duration,
+        double position)
+    {
+        return playing &&
+               !hasOutstandingSeek &&
+               duration > 0 &&
+               position >= duration;
+    }
+
+    internal static double WallClockPosition(double basePosition, double elapsedSeconds, double speed)
+    {
+        return basePosition + elapsedSeconds * speed;
+    }
+
     public double Duration => _session?.Duration ?? 0;
 
     public int VolumeMaximum => 100;
@@ -410,6 +501,15 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         return writeAccepted && serial == currentSerial;
     }
 
+    /// <summary>
+    /// avcodec_send_packet(EAGAIN) means the decoder rejected the input. The same packet may be
+    /// resent only after receive_frame made progress, and only while the serial is still current.
+    /// </summary>
+    internal static bool ShouldResendPacket(int sendResult, bool receivedOutput, bool interrupted)
+    {
+        return sendResult == -ffmpeg.EAGAIN && receivedOutput && !interrupted;
+    }
+
     internal static bool AudioWriteFailureIsDeviceFailure(
         bool writeAccepted,
         bool closing,
@@ -441,6 +541,38 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         return timestamp == ffmpeg.AV_NOPTS_VALUE ? double.NaN : timestamp * ffmpeg.av_q2d(timeBase);
     }
 
+    internal static double StreamEndPosition(double formatStartSeconds, double streamStartSeconds, double streamDurationSeconds)
+    {
+        if (!double.IsFinite(streamDurationSeconds) || streamDurationSeconds <= 0)
+        {
+            return double.NaN;
+        }
+
+        var origin = double.IsFinite(formatStartSeconds) ? formatStartSeconds : 0;
+        var start = double.IsFinite(streamStartSeconds) ? streamStartSeconds : origin;
+        return Math.Max(0, start - origin + streamDurationSeconds);
+    }
+
+    internal static double PlaybackDuration(double formatDuration, double videoEndPosition, double audioEndPosition)
+    {
+        if (double.IsFinite(formatDuration) && formatDuration > 0)
+        {
+            return formatDuration;
+        }
+
+        // Zero means that playback stream is absent. A non-finite value means a selected
+        // stream has no trustworthy end; in that case a partial sibling duration must not be
+        // promoted to an authoritative total because the unknown stream may continue longer.
+        if (!double.IsFinite(videoEndPosition) || !double.IsFinite(audioEndPosition))
+        {
+            return 0;
+        }
+
+        var videoEnd = videoEndPosition > 0 ? videoEndPosition : 0;
+        var audioEnd = audioEndPosition > 0 ? audioEndPosition : 0;
+        return Math.Max(videoEnd, audioEnd);
+    }
+
     private static string? DictionaryValue(AVDictionary* dictionary, string key)
     {
         var entry = ffmpeg.av_dict_get(dictionary, key, null, 0);
@@ -457,9 +589,11 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         private readonly string _fileName;
         private AVFormatContext* _format;
         private readonly int _videoStreamIndex = -1;
-        private int _audioStreamIndex = -1;
+        private volatile int _audioStreamIndex = -1;
         private readonly List<int> _audioStreamIndexes = new();
+        private readonly Dictionary<int, double> _playbackStreamEndPositions = new();
         private readonly double _startTimeSeconds;
+        private readonly double _formatDuration;
 
         private readonly PacketQueue _videoPackets = new();
         private readonly PacketQueue _audioPackets = new();
@@ -482,6 +616,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         private readonly Lock _seekLock = new();
         private int _requestedSerial;
         private double _requestedTarget = -1;
+        private int _requestedAudioStreamIndex = -1;
         private bool _seekPending;
         private int _currentSerial; // serial the pipeline currently runs under
 
@@ -495,6 +630,8 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         private double _audioAnchorPts = double.NaN; // media time of the first sample written since the last sink reset
         private int _audioAnchorSerial = -1;
         private double _audioSpeed = 1.0; // speed the audio currently queued was resampled for
+        private int _audioEofSerial = -1;
+        private double _audioEndPosition = double.NaN; // media position represented by all PCM queued for the current serial
         private bool _audioSinkFailed;
 
         // Restart tracking (see IVideoPlayer.HasPlaybackRestartedSince).
@@ -504,7 +641,11 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         private volatile float _gain = 1f;
         private double _speed = 1.0;
 
-        public double Duration { get; }
+        public double Duration => PlaybackDuration(
+            _formatDuration,
+            SelectedStreamEndPosition(_videoStreamIndex),
+            SelectedStreamEndPosition(_audioStreamIndex));
+
         public int VideoWidth { get; }
         public int VideoHeight { get; }
         public double DisplayAspectRatio { get; }
@@ -586,6 +727,27 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 throw new InvalidOperationException("No audio or video stream found");
             }
 
+            // Cache only streams this player can actually reproduce. Duration is read from UI
+            // threads while teardown may close _format, so the public getter must never walk
+            // native AVStream pointers after construction.
+            if (_hasVideo)
+            {
+                var stream = format->streams[_videoStreamIndex];
+                _playbackStreamEndPositions[_videoStreamIndex] = StreamEndPosition(
+                    _startTimeSeconds,
+                    TimestampToSeconds(stream->start_time, stream->time_base),
+                    TimestampToSeconds(stream->duration, stream->time_base));
+            }
+
+            foreach (var audioIndex in _audioStreamIndexes)
+            {
+                var stream = format->streams[audioIndex];
+                _playbackStreamEndPositions[audioIndex] = StreamEndPosition(
+                    _startTimeSeconds,
+                    TimestampToSeconds(stream->start_time, stream->time_base),
+                    TimestampToSeconds(stream->duration, stream->time_base));
+            }
+
             if (_hasVideo)
             {
                 var parameters = format->streams[_videoStreamIndex]->codecpar;
@@ -597,21 +759,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             }
 
             var duration = format->duration == ffmpeg.AV_NOPTS_VALUE ? double.NaN : format->duration / (double)ffmpeg.AV_TIME_BASE;
-            if (double.IsNaN(duration) || duration <= 0)
-            {
-                duration = 0;
-                for (var i = 0; i < (int)format->nb_streams; i++)
-                {
-                    var stream = format->streams[i];
-                    var streamDuration = TimestampToSeconds(stream->duration, stream->time_base);
-                    if (!double.IsNaN(streamDuration) && streamDuration > duration)
-                    {
-                        duration = streamDuration;
-                    }
-                }
-            }
-
-            Duration = duration;
+            _formatDuration = double.IsFinite(duration) && duration > 0 ? duration : 0;
 
             _audioSink = CreateAudioSink();
             if (_hasAudio)
@@ -632,6 +780,13 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             }
         }
 
+        private double SelectedStreamEndPosition(int streamIndex)
+        {
+            return streamIndex >= 0 && _playbackStreamEndPositions.TryGetValue(streamIndex, out var endPosition)
+                ? endPosition
+                : 0;
+        }
+
         public bool IsPlaying => _playing;
 
         public double Volume
@@ -649,11 +804,15 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                     return;
                 }
 
+                // Capture the playhead while Clock() still uses the old rate. For video-only
+                // playback (or before audio has anchored), changing _speed first would reinterpret
+                // the entire elapsed wall-clock interval at the new rate and jump the seek target.
+                var position = Position;
                 _speed = value;
 
                 // The queued audio was resampled for the old speed and the clocks were anchored
                 // under it; a seek to where we are re-anchors everything at the new speed.
-                Seek(Position);
+                Seek(position);
             }
         }
 
@@ -684,12 +843,12 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 return;
             }
 
-            if (_endReached || (Duration > 0 && Position >= Duration - 0.01))
+            var hasOutstandingSeek = HasOutstandingSeek();
+            if (ShouldAutoRewindOnPlay(hasOutstandingSeek, _endReached, Duration, Position))
             {
                 Seek(0);
             }
 
-            _endReached = false;
             _playing = true;
             _wallClockBase = _pausedPosition;
             _wallClock.Restart();
@@ -727,7 +886,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
 
                 if (_endReached)
                 {
-                    return Duration;
+                    return _pausedPosition;
                 }
 
                 return _playing ? Clock() : _pausedPosition;
@@ -741,10 +900,11 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 _requestedSerial++;
                 _requestedTarget = seconds;
                 _seekPending = true;
-                _pausedPosition = seconds;
             }
 
-            _endReached = false;
+            // Keep the committed playhead/end state unchanged until libavformat accepts the seek.
+            // Position reports _requestedTarget while the request is outstanding, so optimistic
+            // mutation here is unnecessary and would corrupt state if av_seek_frame fails.
             _demuxWake.Set();
         }
 
@@ -768,10 +928,21 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 return null;
             }
 
-            var current = _audioStreamIndexes.IndexOf(_audioStreamIndex);
-            var next = _audioStreamIndexes[(current + 1) % _audioStreamIndexes.Count];
-            _audioStreamIndex = next;
-            Seek(Position); // flushes the queues; the audio thread reopens on the first packet of the new stream
+            var position = Position;
+            int next;
+            lock (_seekLock)
+            {
+                next = NextAudioStreamIndex(_audioStreamIndexes, _audioStreamIndex, _requestedAudioStreamIndex);
+                _requestedSerial++;
+                _requestedTarget = position;
+                _requestedAudioStreamIndex = next;
+                _seekPending = true;
+            }
+
+            // Keep routing the committed track until av_seek_frame succeeds. Otherwise packets
+            // from the requested track can enter the old serial, and a failed seek leaves the
+            // decoder switched even though the playback pipeline never moved.
+            _demuxWake.Set();
 
             var stream = _format->streams[next];
             return new AudioTrackInfo
@@ -803,7 +974,15 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 }
             }
 
-            return _wallClockBase + _wallClock.Elapsed.TotalSeconds * _speed;
+            return WallClockPosition(_wallClockBase, _wallClock.Elapsed.TotalSeconds, _speed);
+        }
+
+        private bool HasOutstandingSeek()
+        {
+            lock (_seekLock)
+            {
+                return _requestedSerial != _currentSerial;
+            }
         }
 
         /// <summary>True when a seek newer than the given serial has been requested (performed or not).</summary>
@@ -824,10 +1003,13 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             {
                 while (!_closing)
                 {
-                    if (TryTakeSeek(out var target, out var serial))
+                    if (TryTakeSeek(out var target, out var serial, out var audioStreamIndex))
                     {
-                        PerformSeek(target, serial);
-                        eof = false;
+                        if (PerformSeek(target, serial, audioStreamIndex))
+                        {
+                            eof = false;
+                        }
+
                         continue;
                     }
 
@@ -883,7 +1065,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             }
         }
 
-        private bool TryTakeSeek(out double target, out int serial)
+        private bool TryTakeSeek(out double target, out int serial, out int audioStreamIndex)
         {
             lock (_seekLock)
             {
@@ -891,23 +1073,27 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 {
                     target = 0;
                     serial = 0;
+                    audioStreamIndex = -1;
                     return false;
                 }
 
                 _seekPending = false;
                 target = _requestedTarget;
                 serial = _requestedSerial;
+                audioStreamIndex = _requestedAudioStreamIndex;
                 return true;
             }
         }
 
-        private void PerformSeek(double target, int serial)
+        private bool PerformSeek(double target, int serial, int audioStreamIndex)
         {
             var timestamp = (long)((target + _startTimeSeconds) * ffmpeg.AV_TIME_BASE);
             var result = ffmpeg.av_seek_frame(_format, -1, timestamp, ffmpeg.AVSEEK_FLAG_BACKWARD);
             if (result < 0)
             {
-                System.Diagnostics.Debug.WriteLine($"ffmpeg seek failed: {FfmpegLibraries.ErrorText(result)}");
+                Se.LogError($"ffmpeg player: seek to {target:0.###} s failed ({FfmpegLibraries.ErrorText(result)})");
+                RollBackFailedSeek(serial);
+                return false;
             }
 
             // Fence the sink first. Any old-serial writer that was already in flight is aborted
@@ -917,9 +1103,21 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             lock (_seekLock)
             {
                 _currentSerial = serial;
+                if (audioStreamIndex >= 0)
+                {
+                    _audioStreamIndex = audioStreamIndex;
+                }
+
+                if (_requestedSerial == serial)
+                {
+                    _requestedAudioStreamIndex = -1;
+                }
+
                 _audioAnchorPts = double.NaN;
                 _audioAnchorSerial = -1;
                 _audioSpeed = _speed;
+                _audioEofSerial = -1;
+                _audioEndPosition = double.NaN;
                 _audioSinkFailed = false;
                 _wallClockBase = target;
                 if (_playing)
@@ -932,9 +1130,37 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 }
             }
 
+            _endReached = false;
             _videoPackets.Flush(serial, target);
             _audioPackets.Flush(serial, target);
             _videoFrames.Flush();
+            _presentWake.Set();
+            return true;
+        }
+
+        private void RollBackFailedSeek(int serial)
+        {
+            // Seek no longer mutates the committed paused position, so this remains the actual
+            // position when paused. While playing, Clock() follows the still-current pipeline.
+            var currentPosition = _playing ? Clock() : _pausedPosition;
+
+            lock (_seekLock)
+            {
+                var requestedSerial = _requestedSerial;
+                var state = FailedSeekState(
+                    serial,
+                    _currentSerial,
+                    requestedSerial,
+                    _requestedTarget,
+                    currentPosition);
+
+                _requestedAudioStreamIndex = FailedSeekAudioStreamState(
+                    serial,
+                    requestedSerial,
+                    _requestedAudioStreamIndex);
+                _requestedSerial = state.RequestedSerial;
+                _requestedTarget = state.RequestedTarget;
+            }
             _presentWake.Set();
         }
 
@@ -969,6 +1195,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 var serial = -1;
                 var dropUntil = -1.0;
                 var presentedForSerial = false;
+                var videoEndPosition = double.NaN;
                 VideoFrame? lastDropped = null; // kept so a target past the last picture still shows something
 
                 while (!_closing)
@@ -984,6 +1211,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                         serial = entry.Serial;
                         dropUntil = entry.SeekTarget;
                         presentedForSerial = false;
+                        videoEndPosition = double.NaN;
                         _videoFrames.Return(lastDropped);
                         lastDropped = null;
                     }
@@ -1042,7 +1270,21 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                             pts = TimestampToSeconds(picture->pts, timeBase);
                         }
 
-                        pts = double.IsNaN(pts) ? 0 : pts - _startTimeSeconds;
+                        if (double.IsNaN(pts))
+                        {
+                            pts = double.IsFinite(videoEndPosition)
+                                ? videoEndPosition
+                                : Math.Max(0, dropUntil);
+                        }
+                        else
+                        {
+                            pts -= _startTimeSeconds;
+                        }
+
+                        var decodedEnd = pts + frameDuration;
+                        videoEndPosition = double.IsFinite(videoEndPosition)
+                            ? Math.Max(videoEndPosition, decodedEnd)
+                            : decodedEnd;
 
                         var (targetWidth, targetHeight) = OutputSize(picture->width, picture->height);
                         var format = (AVPixelFormat)picture->format;
@@ -1127,7 +1369,9 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                         {
                             marker.Serial = serial;
                             marker.IsEndOfStream = true;
-                            marker.Pts = double.MaxValue;
+                            marker.Pts = double.IsFinite(videoEndPosition)
+                                ? Math.Max(0, videoEndPosition)
+                                : Math.Max(0, dropUntil);
                             _videoFrames.Push(marker);
                         }
 
@@ -1406,6 +1650,8 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 var dropUntil = -1.0;
                 var timeBase = default(AVRational);
                 var anchored = false;
+                var queuedAudioEnd = double.NaN;
+                var inferredAudioPts = 0.0;
 
                 while (!_closing)
                 {
@@ -1415,16 +1661,6 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                     }
 
                     var packet = entry.Packet;
-                    if (ShouldDrainAudioAfterSinkFailure())
-                    {
-                        if (packet != null)
-                        {
-                            ffmpeg.av_packet_free(&packet);
-                        }
-
-                        continue;
-                    }
-
                     if (packet != null && packet->stream_index != codecStreamIndex)
                     {
                         if (codec != null)
@@ -1454,39 +1690,55 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                         serial = entry.Serial;
                         dropUntil = entry.SeekTarget;
                         anchored = false;
+                        queuedAudioEnd = double.NaN;
+                        inferredAudioPts = Math.Max(0, dropUntil);
                         if (swr != null)
                         {
                             ffmpeg.swr_free(&swr); // forget buffered samples from before the seek
                         }
                     }
 
+                retryAudioPacket:
                     var sendResult = ffmpeg.avcodec_send_packet(codec, packet);
-                    if (packet != null)
+                    var packetRejected = sendResult == -ffmpeg.EAGAIN;
+                    if (!packetRejected && packet != null)
                     {
                         ffmpeg.av_packet_free(&packet);
                     }
 
-                    if (sendResult < 0 && sendResult != -ffmpeg.EAGAIN && sendResult != ffmpeg.AVERROR_EOF)
+                    if (sendResult < 0 && !packetRejected && sendResult != ffmpeg.AVERROR_EOF)
                     {
                         continue;
                     }
 
+                    var receiveResult = 0;
+                    var receivedOutput = false;
                     while (!_closing)
                     {
-                        var receiveResult = ffmpeg.avcodec_receive_frame(codec, frame);
+                        receiveResult = ffmpeg.avcodec_receive_frame(codec, frame);
                         if (receiveResult < 0)
                         {
                             break;
                         }
 
+                        receivedOutput = true;
                         var pts = TimestampToSeconds(frame->best_effort_timestamp, timeBase);
                         if (double.IsNaN(pts))
                         {
                             pts = TimestampToSeconds(frame->pts, timeBase);
                         }
 
-                        pts = double.IsNaN(pts) ? 0 : pts - _startTimeSeconds;
+                        if (double.IsNaN(pts))
+                        {
+                            pts = inferredAudioPts;
+                        }
+                        else
+                        {
+                            pts -= _startTimeSeconds;
+                        }
+
                         var frameSeconds = frame->sample_rate > 0 ? frame->nb_samples / (double)frame->sample_rate : 0;
+                        inferredAudioPts = Math.Max(inferredAudioPts, pts + frameSeconds);
                         if (dropUntil >= 0 && !anchored && pts + frameSeconds < dropUntil)
                         {
                             ffmpeg.av_frame_unref(frame);
@@ -1587,23 +1839,24 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                         }
 
                         var bytes = written * OutputChannels * 2;
-                        ApplyGain(pcm, bytes, _gain);
 
-                        var writeAccepted = _audioSink.Write(new ReadOnlySpan<byte>(pcm, 0, bytes), serial);
-                        if (!writeAccepted)
+                        if (!WriteAudioChunk(
+                                pcm,
+                                bytes,
+                                serial,
+                                samplePts,
+                                speed,
+                                ref queuedAudioEnd,
+                                out var sinkAccepted))
                         {
-                            // A seek/reset/close also rejects writes and is a normal interruption.
-                            // Only a rejection for the still-current serial means the device path
-                            // itself failed; switch the master clock to wall time in that case.
-                            TryFailOverAudioClock(serial);
                             break;
                         }
 
-                        if (!anchored)
+                        if (!anchored && sinkAccepted)
                         {
                             lock (_seekLock)
                             {
-                                if (!AudioWriteCanAnchor(writeAccepted, serial, _currentSerial))
+                                if (!AudioWriteCanAnchor(sinkAccepted, serial, _currentSerial))
                                 {
                                     break; // a newer seek landed after this chunk was accepted
                                 }
@@ -1626,6 +1879,48 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
 
                             anchored = true;
                         }
+                    }
+
+                    var interrupted = _closing ||
+                                      SeekRequestedSince(serial) ||
+                                      ShouldDrainAudioAfterSinkFailure();
+                    if (ShouldResendPacket(sendResult, receivedOutput, interrupted))
+                    {
+                        goto retryAudioPacket;
+                    }
+
+                    if (packetRejected && !interrupted && !receivedOutput)
+                    {
+                        Se.LogError("ffmpeg player: decoder returned EAGAIN without output; dropping rejected audio packet");
+                    }
+
+                    if (packet != null)
+                    {
+                        ffmpeg.av_packet_free(&packet);
+                    }
+
+                    if (entry.IsEndOfStream && !_closing &&
+                        (sendResult == ffmpeg.AVERROR_EOF || (sendResult >= 0 && receiveResult == ffmpeg.AVERROR_EOF)))
+                    {
+                        // libswresample can retain delayed output after the decoder itself is
+                        // fully drained. Flush it before publishing audio EOF or the tail is cut.
+                        if (swr != null && !FlushResampler(swr, ref pcm, swrSpeed, serial, ref queuedAudioEnd))
+                        {
+                            continue;
+                        }
+
+                        lock (_seekLock)
+                        {
+                            if (serial != _currentSerial || serial != _requestedSerial)
+                            {
+                                continue; // a newer seek superseded this EOF
+                            }
+
+                            _audioEofSerial = serial;
+                            _audioEndPosition = queuedAudioEnd;
+                        }
+
+                        _presentWake.Set();
                     }
                 }
             }
@@ -1703,6 +1998,113 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             return true;
         }
 
+        private bool WriteAudioChunk(
+            byte[] pcm,
+            int bytes,
+            int serial,
+            double samplePts,
+            double speed,
+            ref double queuedAudioEnd,
+            out bool sinkAccepted)
+        {
+            sinkAccepted = false;
+            if (bytes <= 0)
+            {
+                return true;
+            }
+
+            // After a real device failure the decoder must keep running so unknown-duration
+            // streams still produce timestamps/EOF. Skip native output, but keep media-end
+            // accounting so the wall clock can finish at the observed end.
+            var decodeOnly = ShouldDrainAudioAfterSinkFailure();
+            if (!decodeOnly)
+            {
+                ApplyGain(pcm, bytes, _gain);
+                sinkAccepted = _audioSink.Write(new ReadOnlySpan<byte>(pcm, 0, bytes), serial);
+                if (!sinkAccepted)
+                {
+                    // Seek/reset/close rejection is a normal interruption. A rejection that still
+                    // belongs to the current/latest serial is a device failure. Once failover is
+                    // established, this chunk still contributes to media-end accounting even
+                    // though it never became audible.
+                    if (!TryFailOverAudioClock(serial))
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            var chunkMediaSeconds = bytes / OutputBytesPerSecond * speed;
+            var start = double.IsFinite(queuedAudioEnd) ? queuedAudioEnd : 0;
+            if (double.IsFinite(samplePts))
+            {
+                start = Math.Max(start, samplePts);
+            }
+
+            queuedAudioEnd = start + chunkMediaSeconds;
+
+            lock (_seekLock)
+            {
+                if (serial != _currentSerial || serial != _requestedSerial)
+                {
+                    return false;
+                }
+
+                _audioEndPosition = queuedAudioEnd;
+            }
+
+            return true;
+        }
+
+        private bool FlushResampler(
+            SwrContext* swr,
+            ref byte[] pcm,
+            double speed,
+            int serial,
+            ref double queuedAudioEnd)
+        {
+            while (!_closing)
+            {
+                var outSamplesMax = ffmpeg.swr_get_out_samples(swr, 0);
+                if (outSamplesMax <= 0)
+                {
+                    return true;
+                }
+
+                var needed = outSamplesMax * OutputChannels * 2;
+                if (pcm.Length < needed)
+                {
+                    pcm = new byte[needed];
+                }
+
+                int written;
+                fixed (byte* pcmPtr = pcm)
+                {
+                    var output = pcmPtr;
+                    written = ffmpeg.swr_convert(swr, &output, outSamplesMax, null, 0);
+                }
+
+                if (written < 0)
+                {
+                    Se.LogError($"ffmpeg player: failed to flush audio resampler ({FfmpegLibraries.ErrorText(written)})");
+                    return false;
+                }
+
+                if (written == 0)
+                {
+                    return true;
+                }
+
+                var bytes = written * OutputChannels * 2;
+                if (!WriteAudioChunk(pcm, bytes, serial, double.NaN, speed, ref queuedAudioEnd, out _))
+                {
+                    return false;
+                }
+            }
+
+            return false;
+        }
+
         private static void ApplyGain(byte[] pcm, int bytes, float gain)
         {
             if (Math.Abs(gain - 1f) < 0.001f)
@@ -1754,26 +2156,51 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                         if (!_playing)
                         {
                             // Keep the marker: it is what tells a later Play that the end was
-                            // reached, so the clock does not run on past the duration.
+                            // reached, so the clock does not run on past the observed end.
                             _presentWake.WaitOne(50);
+                            continue;
+                        }
+
+                        var observedEnd = frame.Pts;
+                        if (SeekRequestedSince(frame.Serial))
+                        {
+                            // Keep the old EOS marker until the seek commits or fails. Without
+                            // this guard a video-only stream can ReachEnd while av_seek_frame is
+                            // still blocked and lose a Play issued for the requested destination.
+                            _presentWake.WaitOne(20);
                             continue;
                         }
 
                         if (_hasAudio)
                         {
-                            // Video ended first; let the audio play out before stopping. The wake
-                            // event is also set by Play/Pause/Seek and by pushed pictures, so one
-                            // wait is not enough - keep waiting until the clock reaches the end,
-                            // unless playback was paused or a seek moved the pipeline on. The
-                            // marker stays queued meanwhile so a pause here still knows the end.
+                            // Video can finish before audio. For a known duration, retain the old
+                            // duration/stall fallback. For an unknown duration, wait for the audio
+                            // decoder/resampler EOF of this seek serial and for the sink clock to
+                            // reach the last PCM that was actually queued.
                             var interrupted = false;
                             var lastClock = double.NegativeInfinity;
                             var stalledSince = Stopwatch.GetTimestamp();
                             while (_playing && !_closing)
                             {
                                 var now = Clock();
-                                if (now >= Duration - 0.05)
+                                int audioEofSerial;
+                                double audioEnd;
+                                lock (_seekLock)
                                 {
+                                    audioEofSerial = _audioEofSerial;
+                                    audioEnd = _audioEndPosition;
+                                }
+
+                                if (Duration > 0 && now >= Duration - 0.05)
+                                {
+                                    observedEnd = Math.Max(observedEnd, now);
+                                    break;
+                                }
+
+                                if (AudioDrainComplete(audioEofSerial, frame.Serial, audioEnd, now))
+                                {
+                                    observedEnd = Math.Max(observedEnd,
+                                        double.IsFinite(audioEnd) ? audioEnd : now);
                                     break;
                                 }
 
@@ -1782,9 +2209,13 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                                     lastClock = now;
                                     stalledSince = Stopwatch.GetTimestamp();
                                 }
-                                else if (Stopwatch.GetElapsedTime(stalledSince).TotalSeconds > 0.5)
+                                else if ((Duration > 0 || audioEofSerial == frame.Serial) &&
+                                         Stopwatch.GetElapsedTime(stalledSince).TotalSeconds > 0.5)
                                 {
-                                    break; // the audio ran dry short of the reported duration
+                                    // Known-duration legacy fallback, or a broken/stalled sink
+                                    // after the decoder has explicitly said no more audio exists.
+                                    observedEnd = Math.Max(observedEnd, now);
+                                    break;
                                 }
 
                                 if (SeekRequestedSince(frame.Serial))
@@ -1793,13 +2224,18 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                                     break;
                                 }
 
-                                _presentWake.WaitOne(Math.Clamp((int)((Duration - now) * 1000), 1, 200));
+                                var waitMs = Duration > 0
+                                    ? Math.Clamp((int)((Duration - now) * 1000), 1, 200)
+                                    : 20;
+                                _presentWake.WaitOne(waitMs);
                             }
 
                             if (interrupted || !_playing || _closing || SeekRequestedSince(frame.Serial))
                             {
                                 continue;
                             }
+
+                            observedEnd = Math.Max(observedEnd, Clock());
                         }
 
                         var popped = _videoFrames.Pop();
@@ -1809,7 +2245,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                             continue; // flushed by a seek while waiting
                         }
 
-                        ReachEnd();
+                        ReachEnd(observedEnd);
                         continue;
                     }
 
@@ -1869,15 +2305,40 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
 
         private void PresentAudioOnlyTick()
         {
-            if (_playing && Duration > 0 && Clock() >= Duration)
+            if (!_playing)
             {
-                ReachEnd();
+                return;
+            }
+
+            var now = Clock();
+            if (Duration > 0 && now >= Duration)
+            {
+                ReachEnd(now);
+                return;
+            }
+
+            int currentSerial;
+            int requestedSerial;
+            int audioEofSerial;
+            double audioEnd;
+            lock (_seekLock)
+            {
+                currentSerial = _currentSerial;
+                requestedSerial = _requestedSerial;
+                audioEofSerial = _audioEofSerial;
+                audioEnd = _audioEndPosition;
+            }
+
+            if (currentSerial == requestedSerial &&
+                AudioDrainComplete(audioEofSerial, currentSerial, audioEnd, now))
+            {
+                ReachEnd(double.IsFinite(audioEnd) ? audioEnd : now);
             }
         }
 
-        private void ReachEnd()
+        private void ReachEnd(double observedPosition)
         {
-            _pausedPosition = Duration;
+            _pausedPosition = EndPosition(Duration, observedPosition);
             _playing = false;
             _endReached = true;
             _wallClock.Stop();

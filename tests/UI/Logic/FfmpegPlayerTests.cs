@@ -302,6 +302,101 @@ public class FfmpegPlayerTests
     }
 
     [Theory]
+    [InlineData(0.0, 0.0, 60.0, 60.0)]
+    [InlineData(0.0, 5.0, 60.0, 65.0)]
+    [InlineData(10.0, 15.0, 60.0, 65.0)]
+    [InlineData(10.0, double.NaN, 60.0, 60.0)]
+    [InlineData(10.0, 5.0, 2.0, 0.0)]
+    public void StreamEndPosition_UsesStartOffsetAndDuration(
+        double formatStart,
+        double streamStart,
+        double streamDuration,
+        double expected)
+    {
+        Assert.Equal(expected, FfmpegPlayer.StreamEndPosition(formatStart, streamStart, streamDuration));
+    }
+
+    [Theory]
+    [InlineData(0.0)]
+    [InlineData(-1.0)]
+    [InlineData(double.NaN)]
+    public void StreamEndPosition_UnknownDurationStaysUnknown(double streamDuration)
+    {
+        Assert.True(double.IsNaN(FfmpegPlayer.StreamEndPosition(0, 5, streamDuration)));
+    }
+
+    [Theory]
+    [InlineData(120.0, 50.0, 65.0, 120.0)]
+    [InlineData(120.0, double.NaN, double.NaN, 120.0)]
+    [InlineData(0.0, 50.0, 65.0, 65.0)]
+    [InlineData(double.NaN, 50.0, 65.0, 65.0)]
+    [InlineData(0.0, 50.0, 0.0, 50.0)]
+    [InlineData(0.0, 0.0, 0.0, 0.0)]
+    [InlineData(0.0, 50.0, double.NaN, 0.0)]
+    [InlineData(0.0, double.NaN, 65.0, 0.0)]
+    public void PlaybackDuration_PrefersContainerThenSelectedPlaybackStreams(
+        double formatDuration,
+        double videoEnd,
+        double audioEnd,
+        double expected)
+    {
+        Assert.Equal(expected, FfmpegPlayer.PlaybackDuration(formatDuration, videoEnd, audioEnd));
+    }
+
+    [Theory]
+    [InlineData(60.0, 42.5, 60.0)]
+    [InlineData(0.0, 42.5, 42.5)]
+    [InlineData(double.NaN, 42.5, 42.5)]
+    [InlineData(0.0, double.NaN, 0.0)]
+    [InlineData(0.0, -1.0, 0.0)]
+    public void EndPosition_KnownDurationOrObservedFallback(double duration, double observed, double expected)
+    {
+        Assert.Equal(expected, FfmpegPlayer.EndPosition(duration, observed));
+    }
+
+    [Theory]
+    [InlineData(3, 3, 12.0, 11.994, false)]
+    [InlineData(3, 3, 12.0, 11.995, true)]
+    [InlineData(3, 3, 12.0, 12.0, true)]
+    [InlineData(2, 3, 12.0, 99.0, false)]
+    [InlineData(3, 3, double.NaN, 0.0, true)]
+    public void AudioDrainComplete_RequiresCurrentEofAndPlayedTail(
+        int eofSerial,
+        int currentSerial,
+        double audioEnd,
+        double clock,
+        bool expected)
+    {
+        Assert.Equal(expected, FfmpegPlayer.AudioDrainComplete(eofSerial, currentSerial, audioEnd, clock));
+    }
+
+    [Theory]
+    [InlineData(0.0, 10.0, 1.0, 10.0)]
+    [InlineData(0.0, 10.0, 2.0, 20.0)]
+    [InlineData(5.0, 10.0, 0.5, 10.0)]
+    public void WallClockPosition_AppliesRateOnlyToElapsedTime(
+        double basePosition,
+        double elapsedSeconds,
+        double speed,
+        double expected)
+    {
+        Assert.Equal(expected, FfmpegPlayer.WallClockPosition(basePosition, elapsedSeconds, speed));
+    }
+
+    [Fact]
+    public void SpeedChange_MustCaptureWallClockPositionBeforeChangingRate()
+    {
+        // Ten seconds actually played at 1x is still ten seconds when the user switches to 2x.
+        // Reading Clock only after mutating the rate would reinterpret those same ten elapsed
+        // seconds at 2x and incorrectly seek to 20 s.
+        var correctTarget = FfmpegPlayer.WallClockPosition(0, 10, 1);
+        var wrongTargetIfRateChangesFirst = FfmpegPlayer.WallClockPosition(0, 10, 2);
+
+        Assert.Equal(10, correctTarget);
+        Assert.Equal(20, wrongTargetIfRateChangesFirst);
+    }
+
+    [Theory]
     [InlineData(12.5, 60.0, 12.5)]
     [InlineData(75.0, 60.0, 60.0)] // past the end: clamped to the duration
     [InlineData(0.0, 60.0, 0.0)]
@@ -327,6 +422,107 @@ public class FfmpegPlayerTests
     public void SeekTarget_InvalidValue_DoesNotSeek(double value)
     {
         Assert.Null(FfmpegPlayer.SeekTarget(value, 60));
+    }
+
+    [Fact]
+    public void FailedSeekState_LatestRequestRollsBackToCommittedPipeline()
+    {
+        var state = FfmpegPlayer.FailedSeekState(
+            failedSerial: 4,
+            currentSerial: 3,
+            requestedSerial: 4,
+            requestedTarget: 42.0,
+            currentPosition: 12.5);
+
+        Assert.Equal(3, state.RequestedSerial);
+        Assert.Equal(12.5, state.RequestedTarget);
+    }
+
+    [Fact]
+    public void FailedSeekState_StaleFailureDoesNotEraseNewerRequest()
+    {
+        var state = FfmpegPlayer.FailedSeekState(
+            failedSerial: 4,
+            currentSerial: 3,
+            requestedSerial: 5,
+            requestedTarget: 55.0,
+            currentPosition: 12.5);
+
+        Assert.Equal(5, state.RequestedSerial);
+        Assert.Equal(55.0, state.RequestedTarget);
+    }
+
+    [Theory]
+    [InlineData(4, 4, 7, -1)]
+    [InlineData(4, 5, 9, 9)]
+    public void FailedSeekAudioStreamState_RollsBackOnlyTheFailedLatestRequest(
+        int failedSerial,
+        int requestedSerial,
+        int requestedAudioStreamIndex,
+        int expected)
+    {
+        Assert.Equal(expected, FfmpegPlayer.FailedSeekAudioStreamState(
+            failedSerial,
+            requestedSerial,
+            requestedAudioStreamIndex));
+    }
+
+    [Fact]
+    public void NextAudioStreamIndex_UsesPendingSelectionForRapidToggles()
+    {
+        var streams = new[] { 2, 5, 8 };
+
+        Assert.Equal(8, FfmpegPlayer.NextAudioStreamIndex(streams, committedAudioStreamIndex: 5, requestedAudioStreamIndex: -1));
+        Assert.Equal(2, FfmpegPlayer.NextAudioStreamIndex(streams, committedAudioStreamIndex: 5, requestedAudioStreamIndex: 8));
+    }
+
+    [Theory]
+    [InlineData(false, true, 60.0, 60.0, true)]
+    [InlineData(false, false, 60.0, 60.0, true)]
+    [InlineData(false, false, 0.0, 60.0, false)]
+    [InlineData(true, true, 60.0, 60.0, false)]
+    [InlineData(true, false, 60.0, 60.0, false)]
+    public void ShouldAutoRewindOnPlay_DoesNotOverwriteOutstandingSeek(
+        bool hasOutstandingSeek,
+        bool endReached,
+        double duration,
+        double position,
+        bool expected)
+    {
+        Assert.Equal(expected, FfmpegPlayer.ShouldAutoRewindOnPlay(
+            hasOutstandingSeek,
+            endReached,
+            duration,
+            position));
+    }
+
+    [Theory]
+    [InlineData(true, false, 60.0, 60.0, true)]
+    [InlineData(true, true, 60.0, 60.0, false)]
+    [InlineData(false, false, 60.0, 60.0, false)]
+    [InlineData(true, false, 0.0, 60.0, false)]
+    public void ShouldReachAudioOnlyEnd_WaitsForOutstandingSeek(
+        bool playing,
+        bool hasOutstandingSeek,
+        double duration,
+        double position,
+        bool expected)
+    {
+        Assert.Equal(expected, FfmpegPlayer.ShouldReachAudioOnlyEnd(
+            playing,
+            hasOutstandingSeek,
+            duration,
+            position));
+    }
+
+    [Fact]
+    public void ShouldResendPacket_RequiresRejectedInputDecoderProgressAndCurrentSerial()
+    {
+        Assert.True(FfmpegPlayer.ShouldResendPacket(-ffmpeg.EAGAIN, receivedOutput: true, interrupted: false));
+        Assert.False(FfmpegPlayer.ShouldResendPacket(-ffmpeg.EAGAIN, receivedOutput: false, interrupted: false));
+        Assert.False(FfmpegPlayer.ShouldResendPacket(-ffmpeg.EAGAIN, receivedOutput: true, interrupted: true));
+        Assert.False(FfmpegPlayer.ShouldResendPacket(0, receivedOutput: true, interrupted: false));
+        Assert.False(FfmpegPlayer.ShouldResendPacket(ffmpeg.AVERROR_EOF, receivedOutput: true, interrupted: false));
     }
 
     [Theory]
