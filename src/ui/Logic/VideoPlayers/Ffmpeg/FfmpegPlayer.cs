@@ -427,6 +427,11 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                sendResult != ffmpeg.AVERROR_EOF;
     }
 
+    internal static bool ShouldDropPacketBeforeHardwareReplay(int packetSerial, int minimumReplaySerial)
+    {
+        return minimumReplaySerial >= 0 && packetSerial < minimumReplaySerial;
+    }
+
     private static double TimestampToSeconds(long timestamp, AVRational timeBase)
     {
         return timestamp == ffmpeg.AV_NOPTS_VALUE ? double.NaN : timestamp * ffmpeg.av_q2d(timeBase);
@@ -951,6 +956,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                     : 1.0 / 25.0;
 
                 var serial = -1;
+                var minimumReplaySerial = -1;
                 var dropUntil = -1.0;
                 var presentedForSerial = false;
                 VideoFrame? lastDropped = null; // kept so a target past the last picture still shows something
@@ -961,6 +967,21 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                     {
                         continue;
                     }
+
+                    if (ShouldDropPacketBeforeHardwareReplay(entry.Serial, minimumReplaySerial))
+                    {
+                        var stalePacket = entry.Packet;
+                        if (stalePacket != null)
+                        {
+                            ffmpeg.av_packet_free(&stalePacket);
+                        }
+
+                        continue;
+                    }
+
+                    // Equal is the replay seek itself; greater is a user seek that raced ahead.
+                    // Either serial starts from a demux reposition and is safe for the fresh decoder.
+                    minimumReplaySerial = -1;
 
                     if (entry.Serial != serial)
                     {
@@ -990,7 +1011,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                             // feeding it the packet after the one that failed.
                             FallBackToSoftware(ref codec, stream, sendResult, ref hardware);
                             serial = -1;
-                            Seek(Position);
+                            minimumReplaySerial = RequestHardwareFallbackReplay();
                         }
 
                         continue;
@@ -1118,7 +1139,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                         // the key frame.
                         FallBackToSoftware(ref codec, stream, 0, ref hardware);
                         serial = -1;
-                        Seek(Position);
+                        minimumReplaySerial = RequestHardwareFallbackReplay();
                         continue;
                     }
 
@@ -1169,6 +1190,21 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 {
                     ffmpeg.avcodec_free_context(&codec);
                 }
+            }
+        }
+
+        private int RequestHardwareFallbackReplay()
+        {
+            var target = Position;
+            Seek(target);
+
+            // The seek request is asynchronous. Until the demux thread performs it, the video
+            // queue may still contain packets from the failed hardware serial. The fresh software
+            // decoder must not consume those packets because it has none of the old decoder's GOP
+            // reference state. A racing user seek has a higher serial and is safe to accept too.
+            lock (_seekLock)
+            {
+                return _requestedSerial;
             }
         }
 
