@@ -1,6 +1,7 @@
 ﻿using Avalonia;
 using FFmpeg.AutoGen;
 using Nikse.SubtitleEdit.Features.Shared;
+using Nikse.SubtitleEdit.Logic.Download;
 using Nikse.SubtitleEdit.Logic.VideoPlayers.Ffmpeg;
 using Nikse.SubtitleEdit.Logic.VideoPlayers.Ffmpeg.Audio;
 using System.IO.Compression;
@@ -293,17 +294,26 @@ public class FfmpegPlayerTests
         {
             using (var archive = ZipFile.Open(zip, ZipArchiveMode.Create))
             {
-                AddEntry(archive, "ffmpeg-n9.0-latest-win64-lgpl-shared-9.0/bin/avcodec-63.dll");
-                AddEntry(archive, "ffmpeg-n9.0-latest-win64-lgpl-shared-9.0/bin/ffmpeg.exe");
-                AddEntry(archive, "ffmpeg-n9.0-latest-win64-lgpl-shared-9.0/lib/avcodec.lib");
-                AddEntry(archive, "ffmpeg-n9.0-latest-win64-lgpl-shared-9.0/include/libavcodec/avcodec.h");
+                foreach (var required in FfmpegLibraryInstaller.RequiredWindowsLibraryNames)
+                {
+                    AddEntry(archive, "ffmpeg-n9.0-win64-lgpl-shared/bin/" + required);
+                }
+
+                AddEntry(archive, "ffmpeg-n9.0-win64-lgpl-shared/bin/avdevice-extra.dll");
+                AddEntry(archive, "ffmpeg-n9.0-win64-lgpl-shared/bin/ffmpeg.exe");
+                AddEntry(archive, "ffmpeg-n9.0-win64-lgpl-shared/lib/avcodec.lib");
+                AddEntry(archive, "ffmpeg-n9.0-win64-lgpl-shared/include/libavcodec/avcodec.h");
             }
 
             DownloadFfmpegLibsViewModel.ExtractLibraries(zip, folder, CancellationToken.None);
 
-            var files = Directory.GetFiles(folder).Select(Path.GetFileName).ToArray();
-            Assert.Single(files);
-            Assert.Equal("avcodec-63.dll", files[0]);
+            var files = Directory.GetFiles(folder).Select(Path.GetFileName).OrderBy(x => x).ToArray();
+            Assert.Equal(FfmpegLibraryInstaller.RequiredWindowsLibraryNames.Length + 1, files.Length);
+            Assert.Contains("avdevice-extra.dll", files);
+            foreach (var required in FfmpegLibraryInstaller.RequiredWindowsLibraryNames)
+            {
+                Assert.Contains(required, files);
+            }
         }
         finally
         {
@@ -534,6 +544,31 @@ public class FfmpegPlayerTests
         Assert.Equal(
             expected,
             FfmpegPlayer.ShouldScheduleDeferredSessionCleanup(cleanupDeferred, activeWorkers));
+    }
+
+    [Fact]
+    public void RequiredLibraryVersionsMatch_RequiresEveryBindingMajor()
+    {
+        static uint V(int major) => (uint)major << 16;
+
+        var codec = V(ffmpeg.LIBAVCODEC_VERSION_MAJOR);
+        var format = V(ffmpeg.LIBAVFORMAT_VERSION_MAJOR);
+        var util = V(ffmpeg.LIBAVUTIL_VERSION_MAJOR);
+        var scale = V(ffmpeg.LIBSWSCALE_VERSION_MAJOR);
+        var resample = V(ffmpeg.LIBSWRESAMPLE_VERSION_MAJOR);
+
+        Assert.True(FfmpegLibraries.RequiredLibraryVersionsMatch(codec, format, util, scale, resample));
+        Assert.False(FfmpegLibraries.RequiredLibraryVersionsMatch(codec + (1u << 16), format, util, scale, resample));
+        Assert.False(FfmpegLibraries.RequiredLibraryVersionsMatch(codec, format + (1u << 16), util, scale, resample));
+        Assert.False(FfmpegLibraries.RequiredLibraryVersionsMatch(codec, format, util + (1u << 16), scale, resample));
+        Assert.False(FfmpegLibraries.RequiredLibraryVersionsMatch(codec, format, util, scale + (1u << 16), resample));
+        Assert.False(FfmpegLibraries.RequiredLibraryVersionsMatch(codec, format, util, scale, resample + (1u << 16)));
+    }
+
+    [Fact]
+    public void VersionMajor_UsesFfmpegVersionEncoding()
+    {
+        Assert.Equal(63, FfmpegLibraries.VersionMajor((63u << 16) | (12u << 8) | 100u));
     }
 
     [Theory]

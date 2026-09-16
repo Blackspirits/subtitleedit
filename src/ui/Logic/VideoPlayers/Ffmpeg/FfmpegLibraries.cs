@@ -27,6 +27,22 @@ public static class FfmpegLibraries
     /// <summary>libavcodec major the bindings were generated for (63 for FFmpeg 9), as used in the library file names.</summary>
     public static int AvCodecMajor => ffmpeg.LIBAVCODEC_VERSION_MAJOR;
 
+    internal static int VersionMajor(uint version) => (int)(version >> 16);
+
+    internal static bool RequiredLibraryVersionsMatch(
+        uint avcodec,
+        uint avformat,
+        uint avutil,
+        uint swscale,
+        uint swresample)
+    {
+        return VersionMajor(avcodec) == ffmpeg.LIBAVCODEC_VERSION_MAJOR &&
+               VersionMajor(avformat) == ffmpeg.LIBAVFORMAT_VERSION_MAJOR &&
+               VersionMajor(avutil) == ffmpeg.LIBAVUTIL_VERSION_MAJOR &&
+               VersionMajor(swscale) == ffmpeg.LIBSWSCALE_VERSION_MAJOR &&
+               VersionMajor(swresample) == ffmpeg.LIBSWRESAMPLE_VERSION_MAJOR;
+    }
+
     /// <summary>
     /// Set this path (directory only) to override the default search paths - the same idea as
     /// <c>LibVlcDynamicPlayer.LibVlcPath</c>.
@@ -163,6 +179,20 @@ public static class FfmpegLibraries
             // An empty RootPath leaves the lookup to the system loader (PATH / LD_LIBRARY_PATH /
             // dyld), which is the normal case on Linux where FFmpeg is a distro package.
             ffmpeg.RootPath = _resolvedPath;
+
+            // Probe every library the player actually uses. av_version_info() belongs to avutil,
+            // so probing only that function can report the player as available even when codec,
+            // demux, scaling or resampling libraries are missing.
+            var avcodec = ffmpeg.avcodec_version();
+            var avformat = ffmpeg.avformat_version();
+            var avutil = ffmpeg.avutil_version();
+            var swscale = ffmpeg.swscale_version();
+            var swresample = ffmpeg.swresample_version();
+            if (!RequiredLibraryVersionsMatch(avcodec, avformat, avutil, swscale, swresample))
+            {
+                return false;
+            }
+
             var version = ffmpeg.av_version_info();
             if (string.IsNullOrEmpty(version))
             {

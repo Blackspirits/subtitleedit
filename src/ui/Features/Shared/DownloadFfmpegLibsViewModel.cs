@@ -10,7 +10,6 @@ using Nikse.SubtitleEdit.Logic.VideoPlayers.Ffmpeg;
 using System;
 using System.Globalization;
 using System.IO;
-using System.IO.Compression;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Timers;
@@ -37,7 +36,8 @@ public partial class DownloadFfmpegLibsViewModel : ObservableObject, IClosingCle
     private readonly IFfmpegLibsDownloadService _downloadService;
     private Task? _downloadTask;
     private readonly Timer _timer;
-    private bool _done;
+    private volatile bool _done;
+    private int _cleanupStarted;
     private readonly CancellationTokenSource _cancellationTokenSource;
     private IndeterminateProgressHelper? _indeterminateProgressHelper;
     private readonly Lock _lockObj = new();
@@ -94,14 +94,7 @@ public partial class DownloadFfmpegLibsViewModel : ObservableObject, IClosingCle
                 }
                 finally
                 {
-                    try
-                    {
-                        File.Delete(_tempFileName);
-                    }
-                    catch
-                    {
-                        // temp file, best effort
-                    }
+                    TryDeleteTempFile(_tempFileName);
                 }
 
                 StopIndeterminateProgress();
@@ -129,39 +122,21 @@ public partial class DownloadFfmpegLibsViewModel : ObservableObject, IClosingCle
     }
 
     /// <summary>
-    /// Pulls the DLLs out of the build zip (<c>ffmpeg-…/bin/*.dll</c>) into a flat folder. Only the
-    /// libraries are taken: the zip also carries its own ffmpeg.exe, headers and import libs,
-    /// none of which the player needs.
+    /// Stages, validates and transactionally installs the DLLs from the reviewed FFmpeg build zip.
+    /// The active library folder is changed only after all required runtime libraries are present.
     /// </summary>
     internal static void ExtractLibraries(string zipFileName, string targetFolder, CancellationToken cancellationToken)
     {
-        Directory.CreateDirectory(targetFolder);
-        using var archive = ZipFile.OpenRead(zipFileName);
-        var count = 0;
-        foreach (var entry in archive.Entries)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var name = entry.FullName.Replace('\\', '/');
-            if (!name.Contains("/bin/", StringComparison.OrdinalIgnoreCase) ||
-                !name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ||
-                string.IsNullOrEmpty(entry.Name))
-            {
-                continue;
-            }
-
-            var target = Path.Combine(targetFolder, entry.Name);
-            entry.ExtractToFile(target, overwrite: true);
-            count++;
-        }
-
-        if (count == 0)
-        {
-            throw new InvalidOperationException("No FFmpeg libraries found in the downloaded archive");
-        }
+        FfmpegLibraryInstaller.Install(zipFileName, targetFolder, cancellationToken);
     }
 
     private void StartIndeterminateProgress()
     {
+        if (_cancellationTokenSource.IsCancellationRequested)
+        {
+            return;
+        }
+
         _indeterminateProgressHelper?.Dispose();
         _indeterminateProgressHelper = new IndeterminateProgressHelper(
             value => ProgressValue = value,
@@ -183,14 +158,67 @@ public partial class DownloadFfmpegLibsViewModel : ObservableObject, IClosingCle
     [RelayCommand]
     private void CommandCancel()
     {
-        _cancellationTokenSource.Cancel();
-        _done = true;
+        CancelPendingWork();
         Close();
+    }
+
+    private void CancelPendingWork()
+    {
+        _done = true;
+        _cancellationTokenSource.Cancel();
+        StopIndeterminateProgress();
     }
 
     public void OnClosingCleanup()
     {
+        if (Interlocked.Exchange(ref _cleanupStarted, 1) != 0)
+        {
+            return;
+        }
+
+        // Closed can come from the Cancel button, Escape, the title-bar X, or normal success.
+        // Make the first three equivalent: stop all work before detaching the polling timer.
+        CancelPendingWork();
         _timer.StopAndDispose(OnTimerOnElapsed);
+        _ = DeleteTempFileWhenTaskCompletesAsync(_downloadTask, _tempFileName);
+    }
+
+    internal static async Task DeleteTempFileWhenTaskCompletesAsync(Task? downloadTask, string tempFileName)
+    {
+        if (downloadTask != null)
+        {
+            try
+            {
+                await downloadTask.ConfigureAwait(false);
+            }
+            catch
+            {
+                // Cancellation/download failure is already the reason cleanup is running.
+            }
+        }
+
+        TryDeleteTempFile(tempFileName);
+    }
+
+    private static void TryDeleteTempFile(string tempFileName)
+    {
+        if (string.IsNullOrWhiteSpace(tempFileName))
+        {
+            return;
+        }
+
+        try
+        {
+            if (File.Exists(tempFileName))
+            {
+                File.Delete(tempFileName);
+            }
+        }
+        catch
+        {
+            // Best effort. During unpacking the timer callback may still own the ZIP and its
+            // finally block will retry deletion once that operation observes cancellation.
+        }
     }
 
     public void StartDownload()
