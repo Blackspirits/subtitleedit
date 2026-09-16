@@ -525,6 +525,44 @@ public class FfmpegPlayerTests
         Assert.False(FfmpegPlayer.ShouldResendPacket(ffmpeg.AVERROR_EOF, receivedOutput: true, interrupted: false));
     }
 
+    [Fact]
+    public void WaveOutPositionCounterToBytes_AcceptsDriverFallbackFormats()
+    {
+        Assert.Equal(1234, WaveOutPosition.CounterToBytes(WaveOutPosition.TimeBytes, 1234, blockAlign: 4, bytesPerSecond: 192000));
+        Assert.Equal(4000, WaveOutPosition.CounterToBytes(WaveOutPosition.TimeSamples, 1000, blockAlign: 4, bytesPerSecond: 192000));
+        Assert.Equal(176400, WaveOutPosition.CounterToBytes(WaveOutPosition.TimeMilliseconds, 1000, blockAlign: 4, bytesPerSecond: 176400));
+        Assert.Null(WaveOutPosition.CounterToBytes(0x40, 1000, blockAlign: 4, bytesPerSecond: 192000));
+    }
+
+    [Fact]
+    public void WaveOutPositionCounterWrapBytes_UsesTheReturnedCounterUnits()
+    {
+        const long span = 1L << 32;
+
+        Assert.Equal(span, WaveOutPosition.CounterWrapBytes(WaveOutPosition.TimeBytes, blockAlign: 4, bytesPerSecond: 192000));
+        Assert.Equal(span * 4, WaveOutPosition.CounterWrapBytes(WaveOutPosition.TimeSamples, blockAlign: 4, bytesPerSecond: 192000));
+        Assert.Equal(span * 176400 / 1000, WaveOutPosition.CounterWrapBytes(WaveOutPosition.TimeMilliseconds, blockAlign: 4, bytesPerSecond: 176400));
+    }
+
+    [Fact]
+    public void WaveOutPositionWrapBase_FormatSwitchRoundingDoesNotInventAFullWrap()
+    {
+        var wrap = WaveOutPosition.CounterWrapBytes(
+            WaveOutPosition.TimeMilliseconds,
+            blockAlign: 4,
+            bytesPerSecond: 192000);
+
+        Assert.Equal(0, WaveOutPosition.WrapBaseAfterFormatChange(
+            convertedBytes: 3838,
+            lastPositionBytes: 4000,
+            wrapBytes: wrap));
+
+        Assert.Equal(wrap, WaveOutPosition.WrapBaseAfterFormatChange(
+            convertedBytes: 4000,
+            lastPositionBytes: wrap + 4000,
+            wrapBytes: wrap));
+    }
+
     [Theory]
     [InlineData(AVSampleFormat.AV_SAMPLE_FMT_U8, false)]
     [InlineData(AVSampleFormat.AV_SAMPLE_FMT_S16, false)]
