@@ -184,7 +184,10 @@ internal static class SkiaBidiRuns
 
     private static bool IsNumberSeparator(char c)
     {
-        return c is '.' or ',' or ':' or '/' or ' ';
+        // UAX #9 treats the Arabic decimal/thousands separators like the common separators
+        // between digits. Leaving them neutral splits e.g. ١٢٫٣٤ into separate bidi runs in an
+        // RTL paragraph, and L2 run reversal then displays the number as ٣٤٫١٢.
+        return c is '.' or ',' or ':' or '/' or ' ' or '\u066B' or '\u066C';
     }
 
     /// <summary>

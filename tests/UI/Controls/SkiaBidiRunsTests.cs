@@ -40,6 +40,18 @@ public class SkiaBidiRunsTests
         Assert.Equal(new[] { "12:30", "שלום " }, runs.Select(r => r.Text).ToArray());
     }
 
+    [Theory]
+    [InlineData("مرحبا ١٢٫٣٤", "١٢٫٣٤")]
+    [InlineData("مرحبا ١٢٬٣٤٥", "١٢٬٣٤٥")]
+    public void ArabicNumberSeparatorsStayInsideTheNumber(string text, string expectedNumber)
+    {
+        var runs = SkiaBidiRuns.Split(text, rightToLeftParagraph: true);
+
+        Assert.Equal(new[] { expectedNumber, "مرحبا " }, runs.Select(r => r.Text).ToArray());
+        Assert.False(runs[0].RightToLeft);
+        Assert.True(runs[1].RightToLeft);
+    }
+
     [Fact]
     public void LatinWordFollowedByDigitsInRightToLeftParagraphStaysOneRun()
     {
