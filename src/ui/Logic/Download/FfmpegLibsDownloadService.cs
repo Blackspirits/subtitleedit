@@ -34,6 +34,16 @@ public class FfmpegLibsDownloadService(HttpClient httpClient) : IFfmpegLibsDownl
         await VerifySha256Async(destinationFileName, WindowsX64Sha256, cancellationToken);
     }
 
+    internal static bool IsDownloadSupported(bool isWindows, Architecture processArchitecture)
+    {
+        return isWindows && processArchitecture == Architecture.X64;
+    }
+
+    internal static bool IsDownloadSupportedOnCurrentPlatform()
+    {
+        return IsDownloadSupported(OperatingSystem.IsWindows(), RuntimeInformation.ProcessArchitecture);
+    }
+
     internal static async Task VerifySha256Async(string filePath, string expectedSha256, CancellationToken cancellationToken)
     {
         var actual = await Sha256Util.ComputeSha256Async(filePath, cancellationToken);
@@ -64,7 +74,7 @@ public class FfmpegLibsDownloadService(HttpClient httpClient) : IFfmpegLibsDownl
 
     private static string GetUrl()
     {
-        if (OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64)
+        if (IsDownloadSupportedOnCurrentPlatform())
         {
             return WindowsX64Url;
         }
