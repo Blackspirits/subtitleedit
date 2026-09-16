@@ -25,6 +25,13 @@ public interface IAudioSink : IDisposable
     double PlayedSeconds { get; }
 
     /// <summary>
+    /// Returns the best known played position and whether the native clock read is currently
+    /// trustworthy. A false result still supplies the last known position so the player can
+    /// switch clocks without a discontinuity.
+    /// </summary>
+    bool TryGetPlayedSeconds(out double playedSeconds);
+
+    /// <summary>
     /// Drop everything queued, make <paramref name="serial"/> the only serial accepted by
     /// <see cref="Write"/>, and restart the played counter at zero (seek, stop).
     /// </summary>

@@ -536,6 +536,19 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             : wallClockPosition;
     }
 
+    internal static bool AudioClockReadFailureIsDeviceFailure(
+        bool clockValid,
+        bool closing,
+        int audioAnchorSerial,
+        int currentSerial,
+        int requestedSerial)
+    {
+        return !clockValid &&
+               !closing &&
+               audioAnchorSerial == currentSerial &&
+               currentSerial == requestedSerial;
+    }
+
     private static double TimestampToSeconds(long timestamp, AVRational timeBase)
     {
         return timestamp == ffmpeg.AV_NOPTS_VALUE ? double.NaN : timestamp * ffmpeg.av_q2d(timeBase);
@@ -961,6 +974,9 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         /// <summary>Current media time while playing.</summary>
         private double Clock()
         {
+            var clockFailed = false;
+            var failedPosition = 0.0;
+
             if (_hasAudio)
             {
                 lock (_seekLock)
@@ -969,9 +985,39 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                         !double.IsNaN(_audioAnchorPts) &&
                         _audioAnchorSerial == _currentSerial)
                     {
-                        return _audioAnchorPts + _audioSink.PlayedSeconds * _audioSpeed;
+                        var clockValid = _audioSink.TryGetPlayedSeconds(out var playedSeconds);
+                        var audioPosition = _audioAnchorPts + playedSeconds * _audioSpeed;
+                        if (clockValid)
+                        {
+                            return audioPosition;
+                        }
+
+                        if (AudioClockReadFailureIsDeviceFailure(
+                                clockValid,
+                                _closing,
+                                _audioAnchorSerial,
+                                _currentSerial,
+                                _requestedSerial))
+                        {
+                            FailOverAudioClockLocked(audioPosition);
+                            clockFailed = true;
+                            failedPosition = audioPosition;
+                        }
+                        else
+                        {
+                            // A newer seek already owns the future state. Keep reporting the last
+                            // known old-serial position until that transaction commits or rolls back.
+                            return audioPosition;
+                        }
                     }
                 }
+            }
+
+            if (clockFailed)
+            {
+                Se.LogError("ffmpeg player: audio clock query failed, continuing with wall-clock timing");
+                _presentWake.Set();
+                return failedPosition;
             }
 
             return WallClockPosition(_wallClockBase, _wallClock.Elapsed.TotalSeconds, _speed);
@@ -1969,33 +2015,40 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                     return false;
                 }
 
+                _audioSink.TryGetPlayedSeconds(out var playedSeconds);
                 var wallClockPosition = _wallClockBase + _wallClock.Elapsed.TotalSeconds * _speed;
                 var position = AudioClockFailoverPosition(
                     _audioAnchorPts,
                     _audioAnchorSerial,
                     serial,
-                    _audioSink.PlayedSeconds,
+                    playedSeconds,
                     _audioSpeed,
                     wallClockPosition);
 
-                _audioSinkFailed = true;
-                _audioAnchorPts = double.NaN;
-                _audioAnchorSerial = -1;
-                _wallClockBase = position;
-                if (_playing)
-                {
-                    _wallClock.Restart();
-                }
-                else
-                {
-                    _pausedPosition = position;
-                    _wallClock.Reset();
-                }
+                FailOverAudioClockLocked(position);
             }
 
             Se.LogError("ffmpeg player: audio output failed, continuing with wall-clock timing");
             _presentWake.Set();
             return true;
+        }
+
+        /// <summary>Transitions from an audio-device clock to wall-clock timing. Called under _seekLock.</summary>
+        private void FailOverAudioClockLocked(double position)
+        {
+            _audioSinkFailed = true;
+            _audioAnchorPts = double.NaN;
+            _audioAnchorSerial = -1;
+            _wallClockBase = position;
+            if (_playing)
+            {
+                _wallClock.Restart();
+            }
+            else
+            {
+                _pausedPosition = position;
+                _wallClock.Reset();
+            }
         }
 
         private bool WriteAudioChunk(

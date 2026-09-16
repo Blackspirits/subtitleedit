@@ -241,34 +241,43 @@ public sealed unsafe partial class WaveOutAudioSink : IAudioSink
     {
         get
         {
-            lock (_lock)
-            {
-                if (_device == IntPtr.Zero || _bytesPerSecond == 0)
-                {
-                    return 0;
-                }
-
-                var raw = GetRawPositionBytes();
-                return Math.Max(0, raw - _positionBase) / (double)_bytesPerSecond;
-            }
+            TryGetPlayedSeconds(out var playedSeconds);
+            return playedSeconds;
         }
     }
 
-    private long GetRawPositionBytes()
+    public bool TryGetPlayedSeconds(out double playedSeconds)
     {
+        lock (_lock)
+        {
+            if (_device == IntPtr.Zero || _bytesPerSecond == 0)
+            {
+                playedSeconds = 0;
+                return false;
+            }
+
+            var valid = TryGetRawPositionBytes(out var raw);
+            playedSeconds = Math.Max(0, raw - _positionBase) / (double)_bytesPerSecond;
+            return valid;
+        }
+    }
+
+    private bool TryGetRawPositionBytes(out long position)
+    {
+        position = _lastRawPosition;
         // Samples are Microsoft's preferred waveform position format. Drivers may still answer
         // in another supported MMTIME format, so normalize the returned type rather than assuming
         // the request was honoured.
         var time = new MmTime { wType = WaveOutPosition.TimeSamples };
         if (waveOutGetPosition(_device, ref time, (uint)sizeof(MmTime)) != MmSysErrNoError)
         {
-            return _lastRawPosition;
+            return false;
         }
 
         var converted = WaveOutPosition.CounterToBytes(time.wType, time.u, _blockAlign, _bytesPerSecond);
         if (!converted.HasValue)
         {
-            return _lastRawPosition;
+            return false;
         }
 
         var wrapBytes = WaveOutPosition.CounterWrapBytes(time.wType, _blockAlign, _bytesPerSecond);
@@ -290,17 +299,18 @@ public sealed unsafe partial class WaveOutAudioSink : IAudioSink
                 wrapBytes);
         }
 
-        var position = _positionWrapBaseBytes + converted.Value;
-        if (position < _lastRawPosition)
+        var absolutePosition = _positionWrapBaseBytes + converted.Value;
+        if (absolutePosition < _lastRawPosition)
         {
             // Millisecond conversion can round a format switch slightly backwards.
-            position = _lastRawPosition;
+            absolutePosition = _lastRawPosition;
         }
 
         _lastPositionType = time.wType;
         _lastPositionCounter = time.u;
-        _lastRawPosition = position;
-        return position;
+        _lastRawPosition = absolutePosition;
+        position = absolutePosition;
+        return true;
     }
 
     public bool Write(ReadOnlySpan<byte> pcm, int serial)
@@ -376,7 +386,8 @@ public sealed unsafe partial class WaveOutAudioSink : IAudioSink
             _lastPositionType = 0;
             _lastPositionCounter = 0;
             _positionWrapBaseBytes = 0;
-            _positionBase = GetRawPositionBytes();
+            TryGetRawPositionBytes(out var positionBase);
+            _positionBase = positionBase;
             _nextBuffer = 0;
             for (var i = 0; i < BufferCount; i++)
             {

@@ -214,16 +214,25 @@ public sealed unsafe partial class AudioQueueAudioSink : IAudioSink
     {
         get
         {
-            lock (_lock)
-            {
-                if (_queue == IntPtr.Zero || _bytesPerSecond == 0)
-                {
-                    return 0;
-                }
+            TryGetPlayedSeconds(out var playedSeconds);
+            return playedSeconds;
+        }
+    }
 
-                var played = Math.Max(0, CurrentSampleTime() - _sampleBase) * _blockAlign;
-                return Math.Min(played, _bytesWritten) / _bytesPerSecond;
+    public bool TryGetPlayedSeconds(out double playedSeconds)
+    {
+        lock (_lock)
+        {
+            if (_queue == IntPtr.Zero || _bytesPerSecond == 0)
+            {
+                playedSeconds = 0;
+                return false;
             }
+
+            var valid = TryCurrentSampleTime(out var sampleTime);
+            var played = Math.Max(0, sampleTime - _sampleBase) * _blockAlign;
+            playedSeconds = Math.Min(played, _bytesWritten) / _bytesPerSecond;
+            return valid;
         }
     }
 
@@ -240,18 +249,27 @@ public sealed unsafe partial class AudioQueueAudioSink : IAudioSink
     /// <summary>Queue clock in sample frames; the last known value when the queue is not running.</summary>
     private double CurrentSampleTime()
     {
+        TryCurrentSampleTime(out var sampleTime);
+        return sampleTime;
+    }
+
+    private bool TryCurrentSampleTime(out double sampleTime)
+    {
+        sampleTime = _lastSampleTime;
         if (!_started)
         {
-            return _lastSampleTime;
+            return true;
         }
 
         var result = AudioQueueGetCurrentTime(_queue, IntPtr.Zero, out var time, IntPtr.Zero);
-        if (result == 0 && !double.IsNaN(time.mSampleTime))
+        if (result != 0 || !double.IsFinite(time.mSampleTime))
         {
-            _lastSampleTime = time.mSampleTime;
+            return false;
         }
 
-        return _lastSampleTime;
+        _lastSampleTime = time.mSampleTime;
+        sampleTime = _lastSampleTime;
+        return true;
     }
 
     public bool Write(ReadOnlySpan<byte> pcm, int serial)

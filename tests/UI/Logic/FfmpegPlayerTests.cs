@@ -137,6 +137,18 @@ public class FfmpegPlayerTests
     }
 
     [Fact]
+    public void SilentAudioSink_ClockReadingIsAlwaysValid()
+    {
+        using var sink = new SilentAudioSink();
+        sink.Open(48000, 2);
+        sink.Resume();
+
+        Assert.True(sink.Write(new byte[4800], serial: 0));
+        Assert.True(sink.TryGetPlayedSeconds(out var playedSeconds));
+        Assert.InRange(playedSeconds, 0, 0.0251);
+    }
+
+    [Fact]
     public void SilentAudioSink_Reset_AbortsBlockedWrite()
     {
         using var sink = new SilentAudioSink();
@@ -202,6 +214,30 @@ public class FfmpegPlayerTests
                 writeAccepted,
                 closing,
                 serial,
+                currentSerial,
+                requestedSerial));
+    }
+
+    [Theory]
+    [InlineData(false, false, 4, 4, 4, true)]
+    [InlineData(true, false, 4, 4, 4, false)]
+    [InlineData(false, true, 4, 4, 4, false)]
+    [InlineData(false, false, 3, 4, 4, false)]
+    [InlineData(false, false, 4, 4, 5, false)]
+    public void AudioClockReadFailureIsDeviceFailure_RequiresInvalidCurrentLatestSerial(
+        bool clockValid,
+        bool closing,
+        int audioAnchorSerial,
+        int currentSerial,
+        int requestedSerial,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            FfmpegPlayer.AudioClockReadFailureIsDeviceFailure(
+                clockValid,
+                closing,
+                audioAnchorSerial,
                 currentSerial,
                 requestedSerial));
     }
