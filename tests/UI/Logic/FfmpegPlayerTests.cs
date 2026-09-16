@@ -265,6 +265,21 @@ public class FfmpegPlayerTests
     }
 
     [Theory]
+    [InlineData(6, -1, false)]
+    [InlineData(6, 7, true)]
+    [InlineData(7, 7, false)]
+    [InlineData(8, 7, false)]
+    public void ShouldDropPacketBeforeHardwareReplay_RequiresOlderSerial(
+        int packetSerial,
+        int minimumReplaySerial,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            FfmpegPlayer.ShouldDropPacketBeforeHardwareReplay(packetSerial, minimumReplaySerial));
+    }
+
+    [Theory]
     [InlineData(AVSampleFormat.AV_SAMPLE_FMT_U8, false)]
     [InlineData(AVSampleFormat.AV_SAMPLE_FMT_S16, false)]
     [InlineData(AVSampleFormat.AV_SAMPLE_FMT_S32, false)]
