@@ -106,6 +106,60 @@ public class AutoTranslateModelAndSourceTests
     }
 
     [Fact]
+    public void UndetectableSource_NllbSavedCodeMapsToCurrentProvider()
+    {
+        var lastSource = Se.Settings.AutoTranslate.AutoTranslateLastSource;
+        try
+        {
+            var subtitle = new Subtitle();
+            subtitle.Paragraphs.Add(new Paragraph("...", 0, 1000));
+            var languages = new ObservableCollection<TranslationPair>(new GoogleTranslateV1().GetSupportedSourceLanguages());
+
+            Se.Settings.AutoTranslate.AutoTranslateLastSource = "eng_Latn";
+
+            Assert.Equal("en", AutoTranslateViewModel.EvaluateDefaultSourceLanguageCode(null, subtitle, languages));
+        }
+        finally
+        {
+            Se.Settings.AutoTranslate.AutoTranslateLastSource = lastSource;
+        }
+    }
+
+    [Fact]
+    public void LastNllbTarget_MapsToCurrentProviderLanguage()
+    {
+        var translator = new GeminiTranslate();
+        var targets = translator.GetSupportedTargetLanguages();
+        var source = translator.GetSupportedSourceLanguages().First(p => p.Name == "English");
+
+        var selected = AutoTranslateViewModel.FindDefaultTargetLanguage(
+            targets,
+            source,
+            lastTarget: "deu_Latn",
+            uiCultureName: "en-US");
+
+        Assert.NotNull(selected);
+        Assert.Equal("German", selected.Name);
+    }
+
+    [Fact]
+    public void ScriptQualifiedNllbTarget_PreservesVariantAcrossSeparatorConventions()
+    {
+        var translator = new GeminiTranslate();
+        var targets = translator.GetSupportedTargetLanguages();
+        var source = translator.GetSupportedSourceLanguages().First(p => p.Name == "English");
+
+        var selected = AutoTranslateViewModel.FindDefaultTargetLanguage(
+            targets,
+            source,
+            lastTarget: "zho_Hans",
+            uiCultureName: "en-US");
+
+        Assert.NotNull(selected);
+        Assert.Equal("Chinese (Simplified)", selected.Name);
+    }
+
+    [Fact]
     public void DetectableSource_IsStillDetected()
     {
         var lastSource = Se.Settings.AutoTranslate.AutoTranslateLastSource;
