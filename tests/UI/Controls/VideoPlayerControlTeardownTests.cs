@@ -3,6 +3,7 @@ using Avalonia.Threading;
 using Nikse.SubtitleEdit.Controls.VideoPlayer;
 using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.VideoPlayers;
+using Nikse.SubtitleEdit.Logic.VideoPlayers.Ffmpeg;
 using Nikse.SubtitleEdit.Logic.VideoPlayers.LibMpvDynamic;
 using System;
 using System.Reflection;
@@ -23,6 +24,8 @@ public class VideoPlayerControlTeardownTests
     {
         public int DisposeCount;
         public int CloseFileCount;
+        public int CloseFileThreadId;
+        public bool DeferCloseFileToDispose { get; set; }
 
         public string Name => "fake";
         public string FileName { get; private set; } = string.Empty;
@@ -38,6 +41,7 @@ public class VideoPlayerControlTeardownTests
         public void CloseFile()
         {
             CloseFileCount++;
+            CloseFileThreadId = Environment.CurrentManagedThreadId;
             FileName = string.Empty;
         }
 
@@ -67,7 +71,14 @@ public class VideoPlayerControlTeardownTests
         public double Volume { get; set; } = 50;
         public double Speed { get; set; } = 1.0;
 
-        public void Dispose() => DisposeCount++;
+        public void Dispose()
+        {
+            DisposeCount++;
+            if (DeferCloseFileToDispose)
+            {
+                CloseFile();
+            }
+        }
     }
 
     private static UiTickPump? GetPositionTimer(VideoPlayerControl control) =>
@@ -130,6 +141,55 @@ public class VideoPlayerControlTeardownTests
     }
 
     [AvaloniaFact]
+    public async Task CloseAndDisposePlayerDefersBlockingCloseToDisposeThread()
+    {
+        var player = new FakeVideoPlayer { DeferCloseFileToDispose = true };
+        var control = await MakeOpenedControlAsync(player);
+        var callerThreadId = Environment.CurrentManagedThreadId;
+
+        control.CloseAndDisposePlayer();
+
+        await WaitForAsync(() => player.DisposeCount > 0);
+        Assert.Equal(1, player.CloseFileCount);
+        Assert.NotEqual(callerThreadId, player.CloseFileThreadId);
+        Assert.False(GetPositionTimer(control)?.IsEnabled);
+        Assert.Null(control.Content);
+    }
+
+    [AvaloniaFact]
+    public async Task CloseStillClosesDeferredPlayerSynchronouslyForReuse()
+    {
+        var player = new FakeVideoPlayer { DeferCloseFileToDispose = true };
+        var control = await MakeOpenedControlAsync(player);
+        var callerThreadId = Environment.CurrentManagedThreadId;
+
+        control.Close();
+
+        Assert.Equal(1, player.CloseFileCount);
+        Assert.Equal(callerThreadId, player.CloseFileThreadId);
+        Assert.Equal(0, player.DisposeCount);
+        Assert.NotNull(control.Content);
+    }
+
+    [AvaloniaFact]
+    public void CloseAndDisposePlayerTransfersFfmpegRenderHostDisposalOwnership()
+    {
+        var player = new FfmpegPlayer();
+        var host = new FfmpegSoftwareControl(player);
+        var control = new VideoPlayerControl(player)
+        {
+            PlayerContent = host,
+        };
+
+        control.CloseAndDisposePlayer();
+
+        // The render host must no longer own/subcribe to the player before Content is detached;
+        // VideoPlayerControl is now the single background Dispose owner.
+        Assert.Null(host.Player);
+        Assert.Null(control.Content);
+    }
+
+    [AvaloniaFact]
     public async Task CloseAndDisposePlayerIsSafeToRepeat()
     {
         var player = new FakeVideoPlayer();
@@ -142,6 +202,8 @@ public class VideoPlayerControlTeardownTests
         // this twice; the player's own Dispose is the guard, this must not throw.
         control.CloseAndDisposePlayer();
 
+        Assert.Equal(1, player.CloseFileCount);
+        Assert.Equal(1, player.DisposeCount);
         Assert.Null(control.Content);
         Assert.False(GetPositionTimer(control)?.IsEnabled);
     }
