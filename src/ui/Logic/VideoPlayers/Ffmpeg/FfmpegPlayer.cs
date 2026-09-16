@@ -410,6 +410,32 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         return writeAccepted && serial == currentSerial;
     }
 
+    internal static bool AudioWriteFailureIsDeviceFailure(
+        bool writeAccepted,
+        bool closing,
+        int serial,
+        int currentSerial,
+        int requestedSerial)
+    {
+        return !writeAccepted &&
+               !closing &&
+               serial == currentSerial &&
+               serial == requestedSerial;
+    }
+
+    internal static double AudioClockFailoverPosition(
+        double audioAnchorPts,
+        int audioAnchorSerial,
+        int serial,
+        double playedSeconds,
+        double audioSpeed,
+        double wallClockPosition)
+    {
+        return !double.IsNaN(audioAnchorPts) && audioAnchorSerial == serial
+            ? audioAnchorPts + playedSeconds * audioSpeed
+            : wallClockPosition;
+    }
+
     private static double TimestampToSeconds(long timestamp, AVRational timeBase)
     {
         return timestamp == ffmpeg.AV_NOPTS_VALUE ? double.NaN : timestamp * ffmpeg.av_q2d(timeBase);
@@ -469,6 +495,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         private double _audioAnchorPts = double.NaN; // media time of the first sample written since the last sink reset
         private int _audioAnchorSerial = -1;
         private double _audioSpeed = 1.0; // speed the audio currently queued was resampled for
+        private bool _audioSinkFailed;
 
         // Restart tracking (see IVideoPlayer.HasPlaybackRestartedSince).
         private long _lastRestartTimestamp;
@@ -767,7 +794,9 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             {
                 lock (_seekLock)
                 {
-                    if (!double.IsNaN(_audioAnchorPts) && _audioAnchorSerial == _currentSerial)
+                    if (!_audioSinkFailed &&
+                        !double.IsNaN(_audioAnchorPts) &&
+                        _audioAnchorSerial == _currentSerial)
                     {
                         return _audioAnchorPts + _audioSink.PlayedSeconds * _audioSpeed;
                     }
@@ -891,6 +920,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 _audioAnchorPts = double.NaN;
                 _audioAnchorSerial = -1;
                 _audioSpeed = _speed;
+                _audioSinkFailed = false;
                 _wallClockBase = target;
                 if (_playing)
                 {
@@ -1385,6 +1415,16 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                     }
 
                     var packet = entry.Packet;
+                    if (ShouldDrainAudioAfterSinkFailure())
+                    {
+                        if (packet != null)
+                        {
+                            ffmpeg.av_packet_free(&packet);
+                        }
+
+                        continue;
+                    }
+
                     if (packet != null && packet->stream_index != codecStreamIndex)
                     {
                         if (codec != null)
@@ -1552,7 +1592,11 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                         var writeAccepted = _audioSink.Write(new ReadOnlySpan<byte>(pcm, 0, bytes), serial);
                         if (!writeAccepted)
                         {
-                            break; // reset, device failure, seek or close while waiting for room
+                            // A seek/reset/close also rejects writes and is a normal interruption.
+                            // Only a rejection for the still-current serial means the device path
+                            // itself failed; switch the master clock to wall time in that case.
+                            TryFailOverAudioClock(serial);
+                            break;
                         }
 
                         if (!anchored)
@@ -1606,6 +1650,57 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                     ffmpeg.avcodec_free_context(&codec);
                 }
             }
+        }
+
+        private bool ShouldDrainAudioAfterSinkFailure()
+        {
+            lock (_seekLock)
+            {
+                return _audioSinkFailed;
+            }
+        }
+
+        private bool TryFailOverAudioClock(int serial)
+        {
+            lock (_seekLock)
+            {
+                if (!AudioWriteFailureIsDeviceFailure(
+                        writeAccepted: false,
+                        _closing,
+                        serial,
+                        _currentSerial,
+                        _requestedSerial))
+                {
+                    return false;
+                }
+
+                var wallClockPosition = _wallClockBase + _wallClock.Elapsed.TotalSeconds * _speed;
+                var position = AudioClockFailoverPosition(
+                    _audioAnchorPts,
+                    _audioAnchorSerial,
+                    serial,
+                    _audioSink.PlayedSeconds,
+                    _audioSpeed,
+                    wallClockPosition);
+
+                _audioSinkFailed = true;
+                _audioAnchorPts = double.NaN;
+                _audioAnchorSerial = -1;
+                _wallClockBase = position;
+                if (_playing)
+                {
+                    _wallClock.Restart();
+                }
+                else
+                {
+                    _pausedPosition = position;
+                    _wallClock.Reset();
+                }
+            }
+
+            Se.LogError("ffmpeg player: audio output failed, continuing with wall-clock timing");
+            _presentWake.Set();
+            return true;
         }
 
         private static void ApplyGain(byte[] pcm, int bytes, float gain)
