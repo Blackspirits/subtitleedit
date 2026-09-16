@@ -182,6 +182,56 @@ public class FfmpegPlayerTests
         Assert.False(FfmpegPlayer.AudioWriteCanAnchor(writeAccepted: true, serial: 4, currentSerial: 5));
     }
 
+    [Theory]
+    [InlineData(false, false, 4, 4, 4, true)]
+    [InlineData(true, false, 4, 4, 4, false)]
+    [InlineData(false, true, 4, 4, 4, false)]
+    [InlineData(false, false, 4, 5, 5, false)]
+    [InlineData(false, false, 4, 4, 5, false)]
+    public void AudioWriteFailureIsDeviceFailure_RequiresRejectedCurrentSerialWithoutClose(
+        bool writeAccepted,
+        bool closing,
+        int serial,
+        int currentSerial,
+        int requestedSerial,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            FfmpegPlayer.AudioWriteFailureIsDeviceFailure(
+                writeAccepted,
+                closing,
+                serial,
+                currentSerial,
+                requestedSerial));
+    }
+
+    [Fact]
+    public void AudioClockFailoverPosition_PreservesLastPlayedAudioPosition()
+    {
+        Assert.Equal(
+            12.5,
+            FfmpegPlayer.AudioClockFailoverPosition(
+                audioAnchorPts: 10,
+                audioAnchorSerial: 7,
+                serial: 7,
+                playedSeconds: 1.25,
+                audioSpeed: 2,
+                wallClockPosition: 99),
+            precision: 6);
+
+        Assert.Equal(
+            99,
+            FfmpegPlayer.AudioClockFailoverPosition(
+                audioAnchorPts: double.NaN,
+                audioAnchorSerial: -1,
+                serial: 7,
+                playedSeconds: 1.25,
+                audioSpeed: 2,
+                wallClockPosition: 99),
+            precision: 6);
+    }
+
     [Fact]
     public void AudioQueueStartFence_FailsClosedOnAnyCoreAudioStartError()
     {
