@@ -37,6 +37,22 @@ public class FfmpegSoftwareControl : Control
 
     public FfmpegPlayer? Player => _player;
 
+    /// <summary>
+    /// Transfers final-disposal ownership to the containing VideoPlayerControl before that
+    /// control removes this render host. This prevents OnDetachedFromVisualTree from scheduling
+    /// a second concurrent Dispose for the same FfmpegPlayer.
+    /// </summary>
+    internal void RelinquishPlayerForExternalDispose(FfmpegPlayer player)
+    {
+        if (!ReferenceEquals(_player, player))
+        {
+            return;
+        }
+
+        player.FrameReady -= OnFrameReady;
+        _player = null;
+    }
+
     public FfmpegSoftwareControl(FfmpegPlayer player)
     {
         _player = player;

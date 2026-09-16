@@ -106,6 +106,14 @@ public class FfmpegPlayerTests
         queue.Close();
     }
 
+    [Theory]
+    [InlineData(7, 7, true)]
+    [InlineData(7, 8, false)]
+    public void CanPublishVideoFrame_RequiresCurrentSeekSerial(int frameSerial, int currentSerial, bool expected)
+    {
+        Assert.Equal(expected, FfmpegPlayer.CanPublishVideoFrame(frameSerial, currentSerial));
+    }
+
     [Fact]
     public void VideoFrameQueue_SizeChange_DropsOldPool()
     {
@@ -433,6 +441,102 @@ public class FfmpegPlayerTests
     }
 
     [Theory]
+    [InlineData(false, false, 7, 7, false)]
+    [InlineData(true, false, 7, 7, true)]
+    [InlineData(false, true, 7, 7, true)]
+    [InlineData(false, false, 7, 8, true)]
+    public void ShouldInterruptOpen_StopsClosingDisposedOrStaleLoads(
+        bool closing,
+        bool ownerDisposed,
+        int loadGeneration,
+        int currentGeneration,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            FfmpegPlayer.ShouldInterruptOpen(closing, ownerDisposed, loadGeneration, currentGeneration));
+    }
+
+    [Fact]
+    public void StaleSessionCannotOverwriteDecoderBadgeAfterClose()
+    {
+        using var player = new FfmpegPlayer();
+
+        Assert.True(player.TrySetDecoderNameFromSession(0, "old-hardware"));
+        Assert.Contains("old-hardware", player.Name);
+
+        player.CloseFile(); // generation 0 -> 1 and clears owner-visible state
+
+        Assert.False(player.TrySetDecoderNameFromSession(0, "stale-hardware"));
+        Assert.Equal("ffmpeg", player.Name);
+    }
+
+    [Fact]
+    public void StaleCloseCleanupCannotClearNewerGenerationMediaState()
+    {
+        using var player = new FfmpegPlayer();
+        var queue = new VideoFrameQueue(1);
+        var serial = 0;
+
+        player.CloseFile(); // generation 0 -> 1
+
+        Assert.True(player.TrySetDecoderNameFromSession(1, "current-hardware"));
+        var frame = queue.Rent(4, 4, 0, ref serial)!;
+        Assert.True(player.TryPresentFrameFromSession(1, frame, queue));
+        var currentVersion = player.FrameVersion;
+
+        Assert.False(player.TryClearOwnerMediaStateForGeneration(0));
+        Assert.Contains("current-hardware", player.Name);
+        Assert.Equal((4, 4), player.CurrentFrameSize);
+        Assert.Equal(currentVersion, player.FrameVersion);
+
+        Assert.True(player.TryClearOwnerMediaStateForGeneration(1));
+        Assert.Equal("ffmpeg", player.Name);
+        Assert.Equal((0, 0), player.CurrentFrameSize);
+        Assert.Equal(currentVersion + 1, player.FrameVersion);
+
+        queue.Close();
+    }
+
+    [Fact]
+    public void StaleSessionFrameIsReturnedInsteadOfPublishedAfterClose()
+    {
+        using var player = new FfmpegPlayer();
+        var queue = new VideoFrameQueue(1);
+        var serial = 0;
+        var frame = queue.Rent(4, 4, 0, ref serial)!;
+
+        player.CloseFile(); // invalidate generation 0 before the stale worker publishes
+        var versionAfterClose = player.FrameVersion;
+
+        Assert.False(player.TryPresentFrameFromSession(0, frame, queue));
+        Assert.Equal(versionAfterClose, player.FrameVersion);
+        Assert.Equal((0, 0), player.CurrentFrameSize);
+
+        // Rejection returns ownership to the originating session's pool instead of leaking the
+        // frame or handing it to the new/current session.
+        var reused = queue.Rent(4, 4, 0, ref serial);
+        Assert.Same(frame, reused);
+        queue.Return(reused);
+        queue.Close();
+    }
+
+    [Theory]
+    [InlineData(false, 0, false)]
+    [InlineData(true, 2, false)]
+    [InlineData(true, 1, false)]
+    [InlineData(true, 0, true)]
+    public void ShouldScheduleDeferredSessionCleanup_RequiresDeferredLastWorkerExit(
+        bool cleanupDeferred,
+        int activeWorkers,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            FfmpegPlayer.ShouldScheduleDeferredSessionCleanup(cleanupDeferred, activeWorkers));
+    }
+
+    [Theory]
     [InlineData(12.5, 60.0, 12.5)]
     [InlineData(75.0, 60.0, 60.0)] // past the end: clamped to the duration
     [InlineData(0.0, 60.0, 0.0)]
@@ -597,6 +701,49 @@ public class FfmpegPlayerTests
             convertedBytes: 4000,
             lastPositionBytes: wrap + 4000,
             wrapBytes: wrap));
+    }
+
+    [Fact]
+    public void IsDemuxEndOfInput_DistinguishesRecoverableReadErrors()
+    {
+        Assert.True(FfmpegPlayer.IsDemuxEndOfInput(ffmpeg.AVERROR_EOF, avioEnded: false));
+        Assert.True(FfmpegPlayer.IsDemuxEndOfInput(ffmpeg.AVERROR_INVALIDDATA, avioEnded: true));
+        Assert.False(FfmpegPlayer.IsDemuxEndOfInput(ffmpeg.AVERROR_INVALIDDATA, avioEnded: false));
+        Assert.False(FfmpegPlayer.IsDemuxEndOfInput(-ffmpeg.EAGAIN, avioEnded: false));
+    }
+
+    [Fact]
+    public void ShouldRetryDecoderOpenInSoftware_OnlyAfterAttachedHardwareFailure()
+    {
+        Assert.True(FfmpegPlayer.ShouldRetryDecoderOpenInSoftware(-1234, hardwareRequested: true, hardwareAttached: true));
+        Assert.False(FfmpegPlayer.ShouldRetryDecoderOpenInSoftware(-1234, hardwareRequested: false, hardwareAttached: true));
+        Assert.False(FfmpegPlayer.ShouldRetryDecoderOpenInSoftware(-1234, hardwareRequested: true, hardwareAttached: false));
+        Assert.False(FfmpegPlayer.ShouldRetryDecoderOpenInSoftware(0, hardwareRequested: true, hardwareAttached: true));
+    }
+
+    [Fact]
+    public void ShouldReplayHardwareSendFailure_OnlyForFatalHardwareErrors()
+    {
+        Assert.True(FfmpegPlayer.ShouldReplayHardwareSendFailure(-1234, hardware: true));
+        Assert.False(FfmpegPlayer.ShouldReplayHardwareSendFailure(-1234, hardware: false));
+        Assert.False(FfmpegPlayer.ShouldReplayHardwareSendFailure(-ffmpeg.EAGAIN, hardware: true));
+        Assert.False(FfmpegPlayer.ShouldReplayHardwareSendFailure(ffmpeg.AVERROR_EOF, hardware: true));
+        Assert.False(FfmpegPlayer.ShouldReplayHardwareSendFailure(0, hardware: true));
+    }
+
+    [Theory]
+    [InlineData(6, -1, false)]
+    [InlineData(6, 7, true)]
+    [InlineData(7, 7, false)]
+    [InlineData(8, 7, false)]
+    public void ShouldDropPacketBeforeHardwareReplay_RequiresOlderSerial(
+        int packetSerial,
+        int minimumReplaySerial,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            FfmpegPlayer.ShouldDropPacketBeforeHardwareReplay(packetSerial, minimumReplaySerial));
     }
 
     [Theory]

@@ -84,6 +84,10 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
     public string Name => string.IsNullOrEmpty(_decoderName) ? "ffmpeg" : $"ffmpeg ({_decoderName})";
     public string FileName => _fileName;
 
+    // CloseFile joins the demux/decode/presenter workers (up to the teardown timeout). During
+    // definitive UI teardown Dispose already performs that close on a worker thread.
+    public bool DeferCloseFileToDispose => true;
+
     public bool CanLoad()
     {
         return FfmpegLibraries.IsAvailable();
@@ -155,7 +159,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             Session session;
             try
             {
-                session = new Session(this, fileName);
+                session = new Session(this, fileName, generation);
             }
             catch (Exception exception)
             {
@@ -201,25 +205,55 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             {
                 // CloseFile took and disposed the session while it was being started.
             }
+            catch (Exception exception)
+            {
+                Se.LogError(exception, $"ffmpeg player failed to start: {fileName}");
+
+                // Session.Start is transactional, but remove this failed Session from the owner
+                // as well. If CloseFile/replacement already took it, that path owns disposal.
+                if (Interlocked.CompareExchange(ref _session, null, session) == session)
+                {
+                    session.Dispose();
+                    TryClearOwnerMediaStateForGeneration(generation);
+                }
+
+                if (generation == Volatile.Read(ref _loadGeneration))
+                {
+                    _fileName = string.Empty;
+                }
+            }
         });
     }
 
     public void CloseFile()
     {
-        Interlocked.Increment(ref _loadGeneration);
+        var generation = Interlocked.Increment(ref _loadGeneration);
         var session = Interlocked.Exchange(ref _session, null);
         _fileName = string.Empty;
         session?.Dispose();
 
+        // Dispose can wait on stubborn workers. If another load became current meanwhile, this
+        // older close must not clear the newer session's decoder badge or presented frame.
+        TryClearOwnerMediaStateForGeneration(generation);
+    }
+
+    internal bool TryClearOwnerMediaStateForGeneration(int loadGeneration)
+    {
         lock (_currentFrameLock)
         {
-            // The frame belonged to the session's pool, which is gone now.
+            if (loadGeneration != Volatile.Read(ref _loadGeneration))
+            {
+                return false;
+            }
+
+            _decoderName = string.Empty;
             _currentFrame?.Dispose();
             _currentFrame = null;
+            Interlocked.Increment(ref _frameVersion);
         }
 
-        Interlocked.Increment(ref _frameVersion);
         FrameReady?.Invoke();
+        return true;
     }
 
     public void Play()
@@ -395,6 +429,16 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         return basePosition + elapsedSeconds * speed;
     }
 
+    internal static bool ShouldInterruptOpen(bool closing, bool ownerDisposed, int loadGeneration, int currentGeneration)
+    {
+        return closing || ownerDisposed || loadGeneration != currentGeneration;
+    }
+
+    internal static bool ShouldScheduleDeferredSessionCleanup(bool cleanupDeferred, int activeWorkers)
+    {
+        return cleanupDeferred && activeWorkers == 0;
+    }
+
     public double Duration => _session?.Duration ?? 0;
 
     public int VolumeMaximum => 100;
@@ -450,18 +494,51 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         CloseFile();
     }
 
-    private void Present(VideoFrame frame, VideoFrameQueue pool)
+    internal bool TryPresentFrameFromSession(int loadGeneration, VideoFrame frame, VideoFrameQueue pool)
     {
-        VideoFrame? previous;
+        VideoFrame? previous = null;
+        var accepted = false;
         lock (_currentFrameLock)
         {
-            previous = _currentFrame;
-            _currentFrame = frame;
+            // CloseFile increments the generation before waiting for workers. A worker that
+            // outlives that wait must return its frame to its own pool instead of overwriting the
+            // current/new session's UI frame.
+            if (loadGeneration == Volatile.Read(ref _loadGeneration))
+            {
+                previous = _currentFrame;
+                _currentFrame = frame;
+                Interlocked.Increment(ref _frameVersion);
+                accepted = true;
+            }
+        }
+
+        if (!accepted)
+        {
+            pool.Return(frame);
+            return false;
         }
 
         pool.Return(previous);
-        Interlocked.Increment(ref _frameVersion);
+        return true;
+    }
+
+    private void NotifyFrameReady()
+    {
         FrameReady?.Invoke();
+    }
+
+    internal bool TrySetDecoderNameFromSession(int loadGeneration, string decoderName)
+    {
+        lock (_currentFrameLock)
+        {
+            if (loadGeneration != Volatile.Read(ref _loadGeneration))
+            {
+                return false;
+            }
+
+            _decoderName = decoderName;
+            return true;
+        }
     }
 
     private static IAudioSink CreateAudioSink()
@@ -510,6 +587,24 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         return sendResult == -ffmpeg.EAGAIN && receivedOutput && !interrupted;
     }
 
+    internal static bool ShouldReplayHardwareSendFailure(int sendResult, bool hardware)
+    {
+        return hardware &&
+               sendResult < 0 &&
+               sendResult != -ffmpeg.EAGAIN &&
+               sendResult != ffmpeg.AVERROR_EOF;
+    }
+
+    internal static bool ShouldDropPacketBeforeHardwareReplay(int packetSerial, int minimumReplaySerial)
+    {
+        return minimumReplaySerial >= 0 && packetSerial < minimumReplaySerial;
+    }
+
+    internal static bool CanPublishVideoFrame(int frameSerial, int currentSerial)
+    {
+        return frameSerial == currentSerial;
+    }
+
     internal static bool AudioWriteFailureIsDeviceFailure(
         bool writeAccepted,
         bool closing,
@@ -547,6 +642,21 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                !closing &&
                audioAnchorSerial == currentSerial &&
                currentSerial == requestedSerial;
+    }
+
+    /// <summary>
+    /// ffplay only publishes end-of-stream after av_read_frame reports AVERROR_EOF or the
+    /// underlying AVIO context reports that reading ended. Demuxer-level errors such as
+    /// AVERROR_INVALIDDATA can be recoverable on the next read and must not truncate playback.
+    /// </summary>
+    internal static bool IsDemuxEndOfInput(int readResult, bool avioEnded)
+    {
+        return readResult == ffmpeg.AVERROR_EOF || avioEnded;
+    }
+
+    internal static bool ShouldRetryDecoderOpenInSoftware(int openResult, bool hardwareRequested, bool hardwareAttached)
+    {
+        return openResult < 0 && hardwareRequested && hardwareAttached;
     }
 
     private static double TimestampToSeconds(long timestamp, AVRational timeBase)
@@ -619,7 +729,13 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         private Thread? _videoThread;
         private Thread? _audioThread;
         private Thread? _presentThread;
+        private readonly Lock _lifecycleLock = new();
+        private readonly int _ownerLoadGeneration;
         private volatile bool _closing;
+        private bool _resourcesDisposed;
+        private int _activeWorkers;
+        private bool _cleanupDeferredToWorkerExit;
+        private int _deferredCleanupScheduled;
 
         private readonly AutoResetEvent _demuxWake = new(false);
         private readonly AutoResetEvent _presentWake = new(false);
@@ -676,18 +792,24 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         /// </summary>
         private static int InterruptCallback(void* opaque)
         {
-            if (opaque == null)
+            if (opaque == null ||
+                GCHandle.FromIntPtr((IntPtr)opaque).Target is not Session session)
             {
                 return 0;
             }
 
-            return GCHandle.FromIntPtr((IntPtr)opaque).Target is Session { _closing: true } ? 1 : 0;
+            return ShouldInterruptOpen(
+                session._closing,
+                session._owner._disposed,
+                session._ownerLoadGeneration,
+                Volatile.Read(ref session._owner._loadGeneration)) ? 1 : 0;
         }
 
-        public Session(FfmpegPlayer owner, string fileName)
+        public Session(FfmpegPlayer owner, string fileName, int ownerLoadGeneration)
         {
             _owner = owner;
             _fileName = fileName;
+            _ownerLoadGeneration = ownerLoadGeneration;
 
             var format = ffmpeg.avformat_alloc_context();
             if (format == null)
@@ -831,22 +953,102 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
 
         public void Start()
         {
-            _demuxThread = new Thread(DemuxLoop) { IsBackground = true, Name = "ffmpeg demux" };
-            _presentThread = new Thread(PresentLoop) { IsBackground = true, Name = "ffmpeg present" };
-            _demuxThread.Start();
-            _presentThread.Start();
-
-            if (_hasVideo)
+            // CloseFile can take the published session before this load worker reaches Start().
+            // Serialize startup with teardown so Dispose either sees every worker thread or wins
+            // first and makes this start fail without touching already-released native resources.
+            lock (_lifecycleLock)
             {
-                _videoThread = new Thread(VideoLoop) { IsBackground = true, Name = "ffmpeg video" };
-                _videoThread.Start();
+                if (_closing)
+                {
+                    throw new ObjectDisposedException(nameof(Session));
+                }
+
+                try
+                {
+                    StartWorker(ref _demuxThread, DemuxLoop, "ffmpeg demux");
+                    StartWorker(ref _presentThread, PresentLoop, "ffmpeg present");
+
+                    if (_hasVideo)
+                    {
+                        StartWorker(ref _videoThread, VideoLoop, "ffmpeg video");
+                    }
+
+                    if (_hasAudio)
+                    {
+                        StartWorker(ref _audioThread, AudioLoop, "ffmpeg audio");
+                    }
+                }
+                catch
+                {
+                    // Worker startup is all-or-nothing. If a later Thread.Start fails after an
+                    // earlier worker is already running, close/reclaim that partial Session before
+                    // propagating the startup failure to the owner.
+                    DisposeLocked();
+                    throw;
+                }
+            }
+        }
+
+        private void StartWorker(ref Thread? field, ThreadStart loop, string name)
+        {
+            var thread = new Thread(() =>
+            {
+                try
+                {
+                    loop();
+                }
+                finally
+                {
+                    WorkerExited();
+                }
+            })
+            {
+                IsBackground = true,
+                Name = name,
+            };
+
+            field = thread;
+            Interlocked.Increment(ref _activeWorkers);
+            try
+            {
+                thread.Start();
+            }
+            catch
+            {
+                field = null;
+                Interlocked.Decrement(ref _activeWorkers);
+                throw;
+            }
+        }
+
+        private void WorkerExited()
+        {
+            Interlocked.Decrement(ref _activeWorkers);
+            ScheduleDeferredCleanupIfReady();
+        }
+
+        private void ScheduleDeferredCleanupIfReady()
+        {
+            if (!ShouldScheduleDeferredSessionCleanup(
+                    Volatile.Read(ref _cleanupDeferredToWorkerExit),
+                    Volatile.Read(ref _activeWorkers)) ||
+                Interlocked.Exchange(ref _deferredCleanupScheduled, 1) != 0)
+            {
+                return;
             }
 
-            if (_hasAudio)
+            _ = Task.Run(() =>
             {
-                _audioThread = new Thread(AudioLoop) { IsBackground = true, Name = "ffmpeg audio" };
-                _audioThread.Start();
-            }
+                lock (_lifecycleLock)
+                {
+                    if (!_resourcesDisposed &&
+                        _closing &&
+                        Volatile.Read(ref _activeWorkers) == 0)
+                    {
+                        ReleaseResources();
+                    }
+                }
+            });
         }
 
         public void Play()
@@ -1084,7 +1286,16 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                             continue;
                         }
 
-                        // End of file - or a read error, which ffplay treats the same way.
+                        var avioEnded = _format->pb != null && ffmpeg.avio_feof(_format->pb) != 0;
+                        if (!IsDemuxEndOfInput(result, avioEnded))
+                        {
+                            // ffplay retries demuxer-level errors that are not real end-of-input.
+                            // Some demuxers advance past malformed data before returning an error,
+                            // so the next av_read_frame can recover and continue the file.
+                            _demuxWake.WaitOne(10);
+                            continue;
+                        }
+
                         eof = true;
                         _videoPackets.Push(null);
                         _audioPackets.Push(null);
@@ -1223,6 +1434,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             var swsSourceFormat = AVPixelFormat.AV_PIX_FMT_NONE;
             var outputWidth = 0;
             var outputHeight = 0;
+            VideoFrame? lastDropped = null; // detached from the queue while seeking; return it on every exit
 
             try
             {
@@ -1230,7 +1442,9 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 var hardware = HardwareDeviceTypes.Length > 0;
                 codec = OpenDecoder(stream, hardware);
                 hardware = codec->hw_device_ctx != null;
-                _owner._decoderName = hardware ? HardwareDeviceName(codec) : string.Empty;
+                _owner.TrySetDecoderNameFromSession(
+                    _ownerLoadGeneration,
+                    hardware ? HardwareDeviceName(codec) : string.Empty);
                 frame = ffmpeg.av_frame_alloc();
                 transferFrame = ffmpeg.av_frame_alloc();
                 var timeBase = stream->time_base;
@@ -1239,10 +1453,10 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                     : 1.0 / 25.0;
 
                 var serial = -1;
+                var minimumReplaySerial = -1;
                 var dropUntil = -1.0;
                 var presentedForSerial = false;
                 var videoEndPosition = double.NaN;
-                VideoFrame? lastDropped = null; // kept so a target past the last picture still shows something
 
                 while (!_closing)
                 {
@@ -1250,6 +1464,20 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                     {
                         continue;
                     }
+
+                    if (ShouldDropPacketBeforeHardwareReplay(entry.Serial, minimumReplaySerial))
+                    {
+                        var stalePacket = entry.Packet;
+                        if (stalePacket != null)
+                        {
+                            ffmpeg.av_packet_free(&stalePacket);
+                        }
+
+                        continue;
+                    }
+
+                    // Equal is the replay seek itself; greater is a user seek that raced ahead.
+                    minimumReplaySerial = -1;
 
                     if (entry.Serial != serial)
                     {
@@ -1263,25 +1491,28 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                     }
 
                     var packet = entry.Packet;
+                retryVideoPacket:
                     var sendResult = ffmpeg.avcodec_send_packet(codec, packet); // null = drain at end of stream
-                    if (packet != null)
+                    var packetRejected = sendResult == -ffmpeg.EAGAIN;
+                    if (!packetRejected && packet != null)
                     {
                         ffmpeg.av_packet_free(&packet);
                     }
 
-                    if (sendResult < 0 && sendResult != -ffmpeg.EAGAIN && sendResult != ffmpeg.AVERROR_EOF)
+                    if (sendResult < 0 && !packetRejected && sendResult != ffmpeg.AVERROR_EOF)
                     {
-                        if (hardware)
+                        if (ShouldReplayHardwareSendFailure(sendResult, hardware))
                         {
-                            // The hardware decoder rejected the stream - retry it in software.
                             FallBackToSoftware(ref codec, stream, sendResult, ref hardware);
                             serial = -1;
+                            minimumReplaySerial = RequestHardwareFallbackReplay();
                         }
 
                         continue;
                     }
 
                     var hardwareFailed = false;
+                    var receivedOutput = false;
                     while (!_closing)
                     {
                         var receiveResult = ffmpeg.avcodec_receive_frame(codec, frame);
@@ -1291,6 +1522,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                             break;
                         }
 
+                        receivedOutput = true;
                         var picture = frame;
                         if (frame->hw_frames_ctx != null)
                         {
@@ -1390,6 +1622,22 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                         _presentWake.Set();
                     }
 
+                    var interrupted = _closing || SeekRequestedSince(serial);
+                    if (!hardwareFailed && ShouldResendPacket(sendResult, receivedOutput, interrupted))
+                    {
+                        goto retryVideoPacket;
+                    }
+
+                    if (packetRejected && !interrupted && !receivedOutput && !hardwareFailed)
+                    {
+                        Se.LogError("ffmpeg player: decoder returned EAGAIN without output; dropping rejected video packet");
+                    }
+
+                    if (packet != null)
+                    {
+                        ffmpeg.av_packet_free(&packet);
+                    }
+
                     if (hardwareFailed)
                     {
                         // The hardware decoder could not decode or hand back this picture
@@ -1397,7 +1645,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                         // the key frame.
                         FallBackToSoftware(ref codec, stream, 0, ref hardware);
                         serial = -1;
-                        Seek(Position);
+                        minimumReplaySerial = RequestHardwareFallbackReplay();
                         continue;
                     }
 
@@ -1431,6 +1679,8 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             }
             finally
             {
+                _videoFrames.Return(lastDropped);
+
                 if (sws != null)
                 {
                     ffmpeg.sws_freeContext(sws);
@@ -1453,6 +1703,20 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             }
         }
 
+        private int RequestHardwareFallbackReplay()
+        {
+            var target = Position;
+            Seek(target);
+
+            // Seek is asynchronous. Until demux commits it, queued packets may still belong to
+            // the failed hardware serial. The fresh software decoder must wait for this serial or
+            // a newer user-seek serial before consuming compressed input.
+            lock (_seekLock)
+            {
+                return _requestedSerial;
+            }
+        }
+
         /// <summary>
         /// Replaces the hardware decoder context with a software one. The caller's pointer is
         /// nulled before the new decoder is opened, so when OpenDecoder throws the caller's
@@ -1466,7 +1730,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             codec = null;
             ffmpeg.avcodec_free_context(&old);
             hardware = false;
-            _owner._decoderName = string.Empty;
+            _owner.TrySetDecoderNameFromSession(_ownerLoadGeneration, string.Empty);
             codec = OpenDecoder(stream, hardware: false);
         }
 
@@ -1668,8 +1932,19 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             result = ffmpeg.avcodec_open2(codec, decoder, null);
             if (result < 0)
             {
+                var hardwareAttached = codec->hw_device_ctx != null;
+                var retryInSoftware = ShouldRetryDecoderOpenInSoftware(result, hardware, hardwareAttached);
+                var hardwareName = retryInSoftware ? HardwareDeviceName(codec) : string.Empty;
+                var errorText = FfmpegLibraries.ErrorText(result);
                 ffmpeg.avcodec_free_context(&codec);
-                throw new InvalidOperationException($"avcodec_open2: {FfmpegLibraries.ErrorText(result)}");
+
+                if (retryInSoftware)
+                {
+                    Se.LogError($"ffmpeg player: {hardwareName} decoder open failed for {ffmpeg.avcodec_get_name(stream->codecpar->codec_id)} ({errorText}), falling back to software");
+                    return OpenDecoder(stream, hardware: false);
+                }
+
+                throw new InvalidOperationException($"avcodec_open2: {errorText}");
             }
 
             return codec;
@@ -2400,15 +2675,24 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
 
         private void ShowFrame(VideoFrame frame)
         {
-            var popped = _videoFrames.Pop();
-            if (!ReferenceEquals(popped, frame))
-            {
-                _videoFrames.Return(popped);
-                return;
-            }
-
+            var published = false;
             lock (_seekLock)
             {
+                // PresentLoop's earlier serial check is advisory only. A successful seek can
+                // advance _currentSerial before this frame is popped, so claim + publish while
+                // holding the same lock that commits seek serials.
+                if (!CanPublishVideoFrame(frame.Serial, _currentSerial))
+                {
+                    return;
+                }
+
+                var popped = _videoFrames.Pop();
+                if (!ReferenceEquals(popped, frame))
+                {
+                    _videoFrames.Return(popped);
+                    return;
+                }
+
                 if (frame.Serial > _restartSerial)
                 {
                     _restartSerial = frame.Serial;
@@ -2421,38 +2705,67 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 {
                     _pausedPosition = frame.Pts;
                 }
+
+                // Timestamp and owner publication are ordered before the seek lock is released.
+                // The owner applies the independent load-generation fence under _currentFrameLock.
+                Interlocked.Exchange(ref _lastRestartTimestamp, Stopwatch.GetTimestamp());
+                published = _owner.TryPresentFrameFromSession(
+                    _ownerLoadGeneration,
+                    frame,
+                    _videoFrames);
             }
 
-            // Timestamp after the serial so HasPlaybackRestartedSince never sees a new
-            // timestamp with an old serial.
-            Interlocked.Exchange(ref _lastRestartTimestamp, Stopwatch.GetTimestamp());
-            _owner.Present(frame, _videoFrames);
+            // Never invoke UI/user callbacks while either the seek or current-frame lock is held.
+            if (published)
+            {
+                _owner.NotifyFrameReady();
+            }
         }
 
         // ---------------------------------------------------------------- teardown
 
         public void Dispose()
         {
-            _closing = true;
-            _playing = false;
-            _videoPackets.Close();
-            _audioPackets.Close();
-            _videoFrames.Close();
-            _demuxWake.Set();
-            _presentWake.Set();
-
-            // The constructor disposes a half-built session (stream info failed, no usable
-            // stream) before the sink exists, so the sink is null on those paths.
-            var audioSink = _audioSink;
-            if (audioSink != null)
+            lock (_lifecycleLock)
             {
-                try
+                DisposeLocked();
+            }
+        }
+
+        /// <summary>Teardown with <see cref="_lifecycleLock"/> already held.</summary>
+        private void DisposeLocked()
+        {
+            if (_resourcesDisposed)
+            {
+                return;
+            }
+
+            // A previous teardown attempt may have timed out and retained the worker-visible
+            // resources. Keep the Session closed; a later Dispose may retry the joins, and the
+            // last worker to exit also schedules one-shot reclamation.
+            if (!_closing)
+            {
+                _closing = true;
+                _playing = false;
+                _videoPackets.Close();
+                _audioPackets.Close();
+                _videoFrames.Close();
+                _demuxWake.Set();
+                _presentWake.Set();
+
+                // Reject every writer before joining workers. A failed native reset deliberately
+                // leaves the sink fenced; resources still stay alive until every worker is gone.
+                var sinkToReset = _audioSink;
+                if (sinkToReset != null)
                 {
-                    audioSink.Reset(int.MinValue);
-                }
-                catch
-                {
-                    // sink may not have been opened
+                    try
+                    {
+                        sinkToReset.Reset(int.MinValue);
+                    }
+                    catch
+                    {
+                        // Sink may not have been opened on a half-built constructor path.
+                    }
                 }
             }
 
@@ -2461,18 +2774,25 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             stopped &= JoinThread(_audioThread);
             stopped &= JoinThread(_presentThread);
 
-            audioSink?.Dispose();
-            _demuxWake.Dispose();
-            _presentWake.Dispose();
-
             if (!stopped)
             {
-                // A worker is still inside libavformat/libavcodec with this context; closing it
-                // now would be a use-after-free. Leak it (and the handle its interrupt callback
-                // dereferences) rather than crash.
-                Se.LogError($"ffmpeg player: leaking the format context of '{_fileName}' because a thread did not stop");
+                // A live worker may still touch format/codec state, the sink or wake events.
+                // Retain the complete boundary. If the worker later exits, #140's one-shot
+                // deferred cleanup reclaims it; a permanently stuck worker remains fail-closed.
+                Volatile.Write(ref _cleanupDeferredToWorkerExit, true);
+                Se.LogError($"ffmpeg player: retaining session resources for '{_fileName}' because a thread did not stop");
+                ScheduleDeferredCleanupIfReady();
                 return;
             }
+
+            ReleaseResources();
+        }
+
+        private void ReleaseResources()
+        {
+            _audioSink?.Dispose();
+            _demuxWake.Dispose();
+            _presentWake.Dispose();
 
             if (_format != null)
             {
@@ -2485,14 +2805,22 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             {
                 _selfHandle.Free();
             }
+
+            _resourcesDisposed = true;
         }
 
         /// <summary>False when the thread is still running after the timeout.</summary>
         private static bool JoinThread(Thread? thread)
         {
-            if (thread == null || thread == Thread.CurrentThread)
+            if (thread == null)
             {
                 return true;
+            }
+
+            if (thread == Thread.CurrentThread)
+            {
+                Se.LogError($"ffmpeg player: teardown requested from worker thread '{thread.Name}'");
+                return false;
             }
 
             if (thread.Join(TimeSpan.FromSeconds(5)))
