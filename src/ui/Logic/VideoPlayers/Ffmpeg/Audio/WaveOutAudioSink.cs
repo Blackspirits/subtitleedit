@@ -1,10 +1,54 @@
 using Nikse.SubtitleEdit.Logic.Config;
+using Nikse.SubtitleEdit.Logic.Config;
 using System;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Threading;
 
 namespace Nikse.SubtitleEdit.Logic.VideoPlayers.Ffmpeg.Audio;
+
+internal static class WaveOutPosition
+{
+    internal const uint TimeMilliseconds = 0x0001;
+    internal const uint TimeSamples = 0x0002;
+    internal const uint TimeBytes = 0x0004;
+
+    internal static long? CounterToBytes(uint type, uint value, int blockAlign, int bytesPerSecond)
+    {
+        return type switch
+        {
+            TimeBytes => value,
+            TimeSamples => (long)value * blockAlign,
+            TimeMilliseconds => (long)value * bytesPerSecond / 1000,
+            _ => null,
+        };
+    }
+
+    internal static long CounterWrapBytes(uint type, int blockAlign, int bytesPerSecond)
+    {
+        const long counterSpan = 1L << 32;
+        return type switch
+        {
+            TimeBytes => counterSpan,
+            TimeSamples => counterSpan * blockAlign,
+            TimeMilliseconds => counterSpan * bytesPerSecond / 1000,
+            _ => 0,
+        };
+    }
+
+    internal static long WrapBaseAfterFormatChange(long convertedBytes, long lastPositionBytes, long wrapBytes)
+    {
+        if (wrapBytes <= 0 || convertedBytes >= lastPositionBytes)
+        {
+            return 0;
+        }
+
+        // Pick the nearest wrap epoch. A driver switching from samples to milliseconds can round
+        // the same instant a few bytes backwards; that is not evidence of a 32-bit counter wrap.
+        var difference = lastPositionBytes - convertedBytes;
+        return ((difference + wrapBytes / 2) / wrapBytes) * wrapBytes;
+    }
+}
 
 /// <summary>
 /// Windows audio output through the classic waveOut API (winmm.dll). It is available on every
@@ -21,8 +65,6 @@ public sealed unsafe partial class WaveOutAudioSink : IAudioSink
     private const uint WaveMapper = 0xFFFFFFFF;
     private const uint CallbackEvent = 0x00050000;
     private const uint WhdrDone = 0x00000001;
-    private const uint TimeBytes = 0x0004;
-    private const uint TimeSamples = 0x0002;
     private const uint MmSysErrNoError = 0;
 
     [StructLayout(LayoutKind.Sequential)]
@@ -114,12 +156,18 @@ public sealed unsafe partial class WaveOutAudioSink : IAudioSink
     // the counter value seen at the reset.
     private long _positionBase;
     private long _lastRawPosition;
+    private uint _lastPositionType;
+    private uint _lastPositionCounter;
+    private long _positionWrapBaseBytes;
 
     public void Open(int sampleRate, int channels)
     {
         lock (_lock)
         {
-            CloseCore();
+            if (!CloseCore())
+            {
+                throw new InvalidOperationException("Previous waveOut device could not be closed safely");
+            }
 
             var format = new WaveFormatEx
             {
@@ -137,6 +185,11 @@ public sealed unsafe partial class WaveOutAudioSink : IAudioSink
             _bufferBytes -= _bufferBytes % format.nBlockAlign;
 
             _doneEvent = CreateEventW(IntPtr.Zero, false, false, IntPtr.Zero);
+            if (_doneEvent == IntPtr.Zero)
+            {
+                throw new InvalidOperationException($"CreateEventW failed with error {Marshal.GetLastWin32Error()}");
+            }
+
             var result = waveOutOpen(out _device, WaveMapper, ref format, _doneEvent, IntPtr.Zero, CallbackEvent);
             if (result != MmSysErrNoError)
             {
@@ -146,6 +199,10 @@ public sealed unsafe partial class WaveOutAudioSink : IAudioSink
 
             _headers = Marshal.AllocHGlobal(sizeof(WaveHdr) * BufferCount);
             _data = Marshal.AllocHGlobal(_bufferBytes * BufferCount);
+
+            // Initialize every header before preparing any of them. If preparation later fails,
+            // CloseCore can safely unprepare the whole array instead of touching uninitialized
+            // native memory after the failing index.
             for (var i = 0; i < BufferCount; i++)
             {
                 var header = (WaveHdr*)_headers + i;
@@ -155,13 +212,27 @@ public sealed unsafe partial class WaveOutAudioSink : IAudioSink
                     dwBufferLength = (uint)_bufferBytes,
                     dwFlags = 0, // must be zero when prepared
                 };
-                waveOutPrepareHeader(_device, (IntPtr)header, (uint)sizeof(WaveHdr));
+            }
+
+            for (var i = 0; i < BufferCount; i++)
+            {
+                var header = (WaveHdr*)_headers + i;
+                result = waveOutPrepareHeader(_device, (IntPtr)header, (uint)sizeof(WaveHdr));
+                if (result != MmSysErrNoError)
+                {
+                    CloseCore();
+                    throw new InvalidOperationException($"waveOutPrepareHeader failed with error {result}");
+                }
+
                 header->dwFlags |= WhdrDone; // free
             }
 
             _nextBuffer = 0;
             _positionBase = 0;
             _lastRawPosition = 0;
+            _lastPositionType = 0;
+            _lastPositionCounter = 0;
+            _positionWrapBaseBytes = 0;
             _serial = 0;
             _paused = false;
         }
@@ -186,35 +257,51 @@ public sealed unsafe partial class WaveOutAudioSink : IAudioSink
 
     private long GetRawPositionBytes()
     {
-        var time = new MmTime { wType = TimeBytes };
+        // Samples are Microsoft's preferred waveform position format. Drivers may still answer
+        // in another supported MMTIME format, so normalize the returned type rather than assuming
+        // the request was honoured.
+        var time = new MmTime { wType = WaveOutPosition.TimeSamples };
         if (waveOutGetPosition(_device, ref time, (uint)sizeof(MmTime)) != MmSysErrNoError)
         {
             return _lastRawPosition;
         }
 
-        long position;
-        if (time.wType == TimeBytes)
-        {
-            position = time.u;
-        }
-        else if (time.wType == TimeSamples)
-        {
-            // Some drivers refuse TIME_BYTES and answer in sample frames instead.
-            position = (long)time.u * _blockAlign;
-        }
-        else
+        var converted = WaveOutPosition.CounterToBytes(time.wType, time.u, _blockAlign, _bytesPerSecond);
+        if (!converted.HasValue)
         {
             return _lastRawPosition;
         }
 
-        // The 32-bit counter wraps after ~6 hours of 48 kHz stereo; keep it monotonic.
-        if (position < (_lastRawPosition & 0xFFFFFFFF))
+        var wrapBytes = WaveOutPosition.CounterWrapBytes(time.wType, _blockAlign, _bytesPerSecond);
+        if (_lastPositionType == time.wType)
         {
-            _lastRawPosition += 0x100000000;
+            if (time.u < _lastPositionCounter && wrapBytes > 0)
+            {
+                _positionWrapBaseBytes += wrapBytes;
+            }
+        }
+        else
+        {
+            // A driver is allowed to answer a later query in a different format. Choose the wrap
+            // epoch nearest the previous absolute position; small conversion-rounding differences
+            // must not be mistaken for an entire 32-bit counter wrap.
+            _positionWrapBaseBytes = WaveOutPosition.WrapBaseAfterFormatChange(
+                converted.Value,
+                _lastRawPosition,
+                wrapBytes);
         }
 
-        _lastRawPosition = (_lastRawPosition & ~0xFFFFFFFFL) | position;
-        return _lastRawPosition;
+        var position = _positionWrapBaseBytes + converted.Value;
+        if (position < _lastRawPosition)
+        {
+            // Millisecond conversion can round a format switch slightly backwards.
+            position = _lastRawPosition;
+        }
+
+        _lastPositionType = time.wType;
+        _lastPositionCounter = time.u;
+        _lastRawPosition = position;
+        return position;
     }
 
     public bool Write(ReadOnlySpan<byte> pcm, int serial)
@@ -287,6 +374,9 @@ public sealed unsafe partial class WaveOutAudioSink : IAudioSink
             // Drivers differ on whether waveOutReset rewinds the position counter; forget the
             // wrap-around history first so a rewind to 0 is not mistaken for a 32-bit wrap.
             _lastRawPosition = 0;
+            _lastPositionType = 0;
+            _lastPositionCounter = 0;
+            _positionWrapBaseBytes = 0;
             _positionBase = GetRawPositionBytes();
             _nextBuffer = 0;
             for (var i = 0; i < BufferCount; i++)
@@ -326,20 +416,43 @@ public sealed unsafe partial class WaveOutAudioSink : IAudioSink
         }
     }
 
-    private void CloseCore()
+    /// <summary>
+    /// Releases native resources only after WinMM confirms it no longer owns any waveform
+    /// buffers. A failure keeps the complete device/buffer/event boundary alive so Dispose can
+    /// be retried instead of freeing memory that the driver may still reference.
+    /// Called under <see cref="_lock"/>.
+    /// </summary>
+    private bool CloseCore()
     {
         if (_device != IntPtr.Zero)
         {
-            waveOutReset(_device);
+            var resetResult = waveOutReset(_device);
+            if (resetResult != MmSysErrNoError)
+            {
+                Se.LogError($"ffmpeg player: waveOutReset failed during teardown with error {resetResult}; retaining WinMM resources");
+                return false;
+            }
+
             if (_headers != IntPtr.Zero)
             {
                 for (var i = 0; i < BufferCount; i++)
                 {
-                    waveOutUnprepareHeader(_device, (IntPtr)((WaveHdr*)_headers + i), (uint)sizeof(WaveHdr));
+                    var unprepareResult = waveOutUnprepareHeader(_device, (IntPtr)((WaveHdr*)_headers + i), (uint)sizeof(WaveHdr));
+                    if (unprepareResult != MmSysErrNoError)
+                    {
+                        Se.LogError($"ffmpeg player: waveOutUnprepareHeader failed during teardown with error {unprepareResult}; retaining WinMM resources");
+                        return false;
+                    }
                 }
             }
 
-            waveOutClose(_device);
+            var closeResult = waveOutClose(_device);
+            if (closeResult != MmSysErrNoError)
+            {
+                Se.LogError($"ffmpeg player: waveOutClose failed during teardown with error {closeResult}; retaining WinMM resources");
+                return false;
+            }
+
             _device = IntPtr.Zero;
         }
 
@@ -357,9 +470,16 @@ public sealed unsafe partial class WaveOutAudioSink : IAudioSink
 
         if (_doneEvent != IntPtr.Zero)
         {
-            CloseHandle(_doneEvent);
+            if (!CloseHandle(_doneEvent))
+            {
+                Se.LogError($"ffmpeg player: CloseHandle failed during waveOut teardown with error {Marshal.GetLastWin32Error()}; retaining event handle");
+                return false;
+            }
+
             _doneEvent = IntPtr.Zero;
         }
+
+        return true;
     }
 
     public void Dispose()
