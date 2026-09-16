@@ -4119,6 +4119,8 @@ public partial class SpeechToTextViewModel : ObservableObject
                 startInfo.EnvironmentVariables["PYTHONUTF8"] = "1";
                 startInfo.EnvironmentVariables["PYTHONUNBUFFERED"] = "1";
 
+                WhisperEngineWhisperX.ConfigureModelEnvironment(startInfo);
+
                 // pyannote warns that torchcodec is missing on every run, but WhisperX never
                 // uses pyannote's decoder (it feeds ffmpeg-decoded audio in memory), so the
                 // warning is pure noise in the log. Only UserWarning is silenced; real errors
@@ -4212,7 +4214,7 @@ public partial class SpeechToTextViewModel : ObservableObject
 
             Se.WriteToolsLog($"{exe} {crispParams}");
 
-            return StartEngineProcess(exe, crispParams, dataReceivedHandler);
+            return StartEngineProcess(exe, crispParams, dataReceivedHandler, CrispAsrEngineBase.ConfigureModelEnvironment);
         }
 
         var settings = Se.Settings.Tools.AudioToText;
@@ -4317,6 +4319,18 @@ public partial class SpeechToTextViewModel : ObservableObject
         if (!string.IsNullOrEmpty(cppVulkanDevice))
         {
             process.StartInfo.EnvironmentVariables["GGML_VULKAN_DEVICE"] = cppVulkanDevice;
+        }
+
+        // Python Whisper and huggingface_hub derive their default caches from these variables.
+        // Keep their expected subfolder names so model-name arguments continue to work while
+        // the actual weights live under the user-selected Subtitle Edit model root.
+        if (Se.HasCustomModelsFolder && settings.WhisperChoice == WhisperChoice.OpenAi)
+        {
+            process.StartInfo.EnvironmentVariables["XDG_CACHE_HOME"] = Path.Combine(Se.ModelsFolder, "SpeechToText");
+        }
+        else if (Se.HasCustomModelsFolder && settings.WhisperChoice == WhisperChoice.CTranslate2)
+        {
+            process.StartInfo.EnvironmentVariables["HF_HOME"] = Path.Combine(Se.ModelsFolder, "SpeechToText", "HuggingFace");
         }
 
         var whisperFolder = engine.GetAndCreateWhisperFolder();

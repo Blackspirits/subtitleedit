@@ -40,13 +40,26 @@ public static class TtsVoiceInstaller
                 window, vm => vm.StartDownloadPiperVoice(piperVoice));
             if (!dlResult.OkPressed)
             {
-                SafeDelete(Path.Combine(Piper.GetSetPiperFolder(), piperVoice.ModelShort));
-                SafeDelete(Path.Combine(Piper.GetSetPiperFolder(), piperVoice.ConfigShort));
+                foreach (var fileName in GetPiperVoiceModelFiles(piperVoice))
+                {
+                    SafeDelete(fileName);
+                }
+
                 return false;
             }
         }
 
         return true;
+    }
+
+    internal static string[] GetPiperVoiceModelFiles(PiperVoice piperVoice)
+    {
+        var modelsFolder = Piper.GetSetModelsFolder();
+        return
+        [
+            Path.Combine(modelsFolder, piperVoice.ModelShort),
+            Path.Combine(modelsFolder, piperVoice.ConfigShort),
+        ];
     }
 
     /// <summary>

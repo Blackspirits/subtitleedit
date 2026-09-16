@@ -1,4 +1,10 @@
 using Nikse.SubtitleEdit.Logic.Config;
+using Nikse.SubtitleEdit.Core.Common;
+using Nikse.SubtitleEdit.Features.Video.SpeechToText.Engines;
+using Nikse.SubtitleEdit.Features.Video.TextToSpeech;
+using Nikse.SubtitleEdit.Features.Video.TextToSpeech.Engines;
+using Nikse.SubtitleEdit.Features.Video.TextToSpeech.Voices;
+using Nikse.SubtitleEdit.UiLogic.AudioToText;
 
 namespace UITests.Logic.Config;
 
@@ -97,6 +103,314 @@ public class DataFolderLocationTests
                 Path.IsPathRooted(folder),
                 $"\"{folder}\" is not an absolute path - it would resolve against the working directory.");
             Assert.StartsWith(Se.DataFolder, folder, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void EmptyModelsFolder_PreservesLegacyLocations()
+    {
+        var original = Se.Settings.General.ModelsFolder;
+        var originalModelsDirectory = Configuration.ModelsDirectory;
+        try
+        {
+            Se.Settings.General.ModelsFolder = string.Empty;
+            Configuration.ModelsDirectory = string.Empty;
+
+            Assert.Equal(Se.DataFolder, Se.ModelsFolder);
+            Assert.False(Se.HasCustomModelsFolder);
+            Assert.Equal(
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "whisper"),
+                new WhisperModel().ModelFolder);
+            Assert.Equal(Path.Combine(Se.TextToSpeechFolder, "Piper"), Se.PiperModelsFolder);
+        }
+        finally
+        {
+            Se.Settings.General.ModelsFolder = original;
+            Configuration.ModelsDirectory = originalModelsDirectory;
+        }
+    }
+
+    [Fact]
+    public void DataFolderWithTrailingSeparator_RemainsLegacyLayout()
+    {
+        var original = Se.Settings.General.ModelsFolder;
+        try
+        {
+            Se.Settings.General.ModelsFolder = Se.DataFolder + Path.DirectorySeparatorChar;
+
+            Assert.Equal(Path.TrimEndingDirectorySeparator(Se.DataFolder), Se.ModelsFolder);
+            Assert.False(Se.HasCustomModelsFolder);
+        }
+        finally
+        {
+            Se.Settings.General.ModelsFolder = original;
+        }
+    }
+
+    [Fact]
+    public void WindowsDataFolderComparison_IsCaseInsensitive()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var original = Se.Settings.General.ModelsFolder;
+        try
+        {
+            Se.Settings.General.ModelsFolder = Se.DataFolder.ToUpperInvariant();
+
+            Assert.False(Se.HasCustomModelsFolder);
+        }
+        finally
+        {
+            Se.Settings.General.ModelsFolder = original;
+        }
+    }
+
+    [Fact]
+    public void RelativeModelsFolder_FallsBackToDataFolder()
+    {
+        var original = Se.Settings.General.ModelsFolder;
+        try
+        {
+            Se.Settings.General.ModelsFolder = Path.Combine("relative", "models");
+
+            Assert.Equal(Se.DataFolder, Se.ModelsFolder);
+            Assert.False(Se.HasCustomModelsFolder);
+        }
+        finally
+        {
+            Se.Settings.General.ModelsFolder = original;
+        }
+    }
+
+    [Fact]
+    public void CustomModelsFolder_UsesTheSelectedRootWithoutChangingTheAppDataFolder()
+    {
+        var original = Se.Settings.General.ModelsFolder;
+        var originalModelsDirectory = Configuration.ModelsDirectory;
+        var selected = Path.Combine(Path.GetTempPath(), "subtitle-edit-models-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Se.Settings.General.ModelsFolder = selected;
+            Configuration.ModelsDirectory = selected;
+
+            Assert.Equal(Path.GetFullPath(selected), Se.ModelsFolder);
+            Assert.True(Se.HasCustomModelsFolder);
+            Assert.Equal(Se.DataFolder, Path.GetDirectoryName(Se.GetErrorLogFilePath()));
+            Assert.Equal(Path.Combine(selected, "CrispASR", "models"), Se.CrispAsrModelsFolder);
+            Assert.Equal(
+                Path.Combine(selected, "SpeechToText", "whisper"),
+                new WhisperModel().ModelFolder);
+            Assert.Equal(
+                Path.Combine(selected, "TextToSpeech", "Piper", "models"),
+                Se.PiperModelsFolder);
+        }
+        finally
+        {
+            Se.Settings.General.ModelsFolder = original;
+            Configuration.ModelsDirectory = originalModelsDirectory;
+        }
+    }
+
+    [Fact]
+    public void CustomModelsFolder_CanceledPiperVoiceCleanupTargetsModelRoot()
+    {
+        var original = Se.Settings.General.ModelsFolder;
+        var originalModelsDirectory = Configuration.ModelsDirectory;
+        var selected = Path.Combine(Path.GetTempPath(), "subtitle-edit-piper-cleanup-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Se.Settings.General.ModelsFolder = selected;
+            Configuration.ModelsDirectory = selected;
+            var voice = new PiperVoice(
+                "Test voice",
+                "English",
+                "medium",
+                "en/test-medium.onnx",
+                "en/test-medium.onnx.json");
+
+            var files = TtsVoiceInstaller.GetPiperVoiceModelFiles(voice);
+
+            Assert.Equal(
+                [
+                    Path.Combine(selected, "TextToSpeech", "Piper", "models", "test-medium.onnx"),
+                    Path.Combine(selected, "TextToSpeech", "Piper", "models", "test-medium.onnx.json"),
+                ],
+                files);
+            Assert.All(files, file => Assert.DoesNotContain(Piper.GetSetPiperFolder(), file, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Se.Settings.General.ModelsFolder = original;
+            Configuration.ModelsDirectory = originalModelsDirectory;
+            if (Directory.Exists(selected))
+            {
+                Directory.Delete(selected, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void CustomModelsFolder_RoutesAllCurrentAudioCppTtsModelsUnderSelectedRoot()
+    {
+        var original = Se.Settings.General.ModelsFolder;
+        var originalModelsDirectory = Configuration.ModelsDirectory;
+        var selected = Path.Combine(Path.GetTempPath(), "subtitle-edit-audiocpp-models-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Se.Settings.General.ModelsFolder = selected;
+            Configuration.ModelsDirectory = selected;
+
+            Assert.Equal(
+                Path.Combine(selected, "audio.cpp", "models", "IndexTTS2.5-GGUF"),
+                IndexTts25AudioCpp.GetSetModelsFolder());
+            Assert.Equal(
+                Path.Combine(selected, "audio.cpp", "models", "FireRedTTS3-Base-GGUF"),
+                FireRedTts3AudioCpp.GetSetModelsFolder());
+            Assert.Equal(
+                Path.Combine(selected, "audio.cpp", "models", "Fish-Audio-S2-Pro-GGUF"),
+                FishTtsAudioCpp.GetSetModelsFolder());
+            Assert.Equal(
+                Path.Combine(selected, "audio.cpp", "models", "Higgs-Audio-v3-TTS-4B-GGUF"),
+                HiggsTtsAudioCpp.GetSetModelsFolder());
+        }
+        finally
+        {
+            Se.Settings.General.ModelsFolder = original;
+            Configuration.ModelsDirectory = originalModelsDirectory;
+            if (Directory.Exists(selected))
+            {
+                Directory.Delete(selected, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void CustomModelsFolder_ConfiguresWhisperXHuggingFaceCacheUnderSelectedRoot()
+    {
+        var original = Se.Settings.General.ModelsFolder;
+        var selected = Path.Combine(Path.GetTempPath(), "subtitle-edit-whisperx-models-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Se.Settings.General.ModelsFolder = selected;
+            var startInfo = new System.Diagnostics.ProcessStartInfo();
+
+            WhisperEngineWhisperX.ConfigureModelEnvironment(startInfo);
+
+            Assert.Equal(
+                Path.Combine(selected, "SpeechToText", "HuggingFace"),
+                startInfo.EnvironmentVariables["HF_HOME"]);
+        }
+        finally
+        {
+            Se.Settings.General.ModelsFolder = original;
+        }
+    }
+
+    [Fact]
+    public void LegacyModelsLayout_DoesNotOverrideCallerWhisperXHuggingFaceCache()
+    {
+        var original = Se.Settings.General.ModelsFolder;
+        try
+        {
+            Se.Settings.General.ModelsFolder = string.Empty;
+            var startInfo = new System.Diagnostics.ProcessStartInfo();
+            startInfo.EnvironmentVariables["HF_HOME"] = "keep-hf-home";
+
+            WhisperEngineWhisperX.ConfigureModelEnvironment(startInfo);
+
+            Assert.Equal("keep-hf-home", startInfo.EnvironmentVariables["HF_HOME"]);
+        }
+        finally
+        {
+            Se.Settings.General.ModelsFolder = original;
+        }
+    }
+
+    [Fact]
+    public void CustomModelsFolder_ConfiguresCrispAsrAutoDownloadsUnderSelectedRoot()
+    {
+        var original = Se.Settings.General.ModelsFolder;
+        var originalModelsDirectory = Configuration.ModelsDirectory;
+        var selected = Path.Combine(Path.GetTempPath(), "subtitle-edit-crispasr-models-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Se.Settings.General.ModelsFolder = selected;
+            Configuration.ModelsDirectory = selected;
+            var startInfo = new System.Diagnostics.ProcessStartInfo();
+
+            CrispAsrEngineBase.ConfigureModelEnvironment(startInfo);
+
+            var expected = Path.Combine(selected, "CrispASR", "models");
+            Assert.Equal(expected, CrispAsrEngineBase.AutoDownloadModelsFolder);
+            Assert.Equal(expected, startInfo.EnvironmentVariables["CRISPASR_MODELS_DIR"]);
+            Assert.Equal(expected, startInfo.EnvironmentVariables["CRISPASR_CACHE_DIR"]);
+            Assert.True(Directory.Exists(expected));
+        }
+        finally
+        {
+            Se.Settings.General.ModelsFolder = original;
+            Configuration.ModelsDirectory = originalModelsDirectory;
+            if (Directory.Exists(selected))
+            {
+                Directory.Delete(selected, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void LegacyModelsLayout_ReusesCrispAsrEnvironmentPrecedence()
+    {
+        var originalModelsFolder = Se.Settings.General.ModelsFolder;
+        var originalModelsDirectory = Configuration.ModelsDirectory;
+        var originalCacheEnvironment = Environment.GetEnvironmentVariable("CRISPASR_CACHE_DIR");
+        var originalModelsEnvironment = Environment.GetEnvironmentVariable("CRISPASR_MODELS_DIR");
+        try
+        {
+            Se.Settings.General.ModelsFolder = string.Empty;
+            Configuration.ModelsDirectory = string.Empty;
+            Environment.SetEnvironmentVariable("CRISPASR_MODELS_DIR", "models-root");
+            Environment.SetEnvironmentVariable("CRISPASR_CACHE_DIR", "cache-root");
+
+            Assert.Equal("cache-root", CrispAsrEngineBase.AutoDownloadModelsFolder);
+
+            Environment.SetEnvironmentVariable("CRISPASR_CACHE_DIR", null);
+
+            Assert.Equal("models-root", CrispAsrEngineBase.AutoDownloadModelsFolder);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("CRISPASR_CACHE_DIR", originalCacheEnvironment);
+            Environment.SetEnvironmentVariable("CRISPASR_MODELS_DIR", originalModelsEnvironment);
+            Se.Settings.General.ModelsFolder = originalModelsFolder;
+            Configuration.ModelsDirectory = originalModelsDirectory;
+        }
+    }
+
+    [Fact]
+    public void LegacyModelsLayout_DoesNotOverrideCallerCrispAsrEnvironment()
+    {
+        var original = Se.Settings.General.ModelsFolder;
+        var originalModelsDirectory = Configuration.ModelsDirectory;
+        try
+        {
+            Se.Settings.General.ModelsFolder = string.Empty;
+            Configuration.ModelsDirectory = string.Empty;
+            var startInfo = new System.Diagnostics.ProcessStartInfo();
+            startInfo.EnvironmentVariables["CRISPASR_MODELS_DIR"] = "keep-models";
+            startInfo.EnvironmentVariables["CRISPASR_CACHE_DIR"] = "keep-cache";
+
+            CrispAsrEngineBase.ConfigureModelEnvironment(startInfo);
+
+            Assert.Equal("keep-models", startInfo.EnvironmentVariables["CRISPASR_MODELS_DIR"]);
+            Assert.Equal("keep-cache", startInfo.EnvironmentVariables["CRISPASR_CACHE_DIR"]);
+        }
+        finally
+        {
+            Se.Settings.General.ModelsFolder = original;
+            Configuration.ModelsDirectory = originalModelsDirectory;
         }
     }
 }

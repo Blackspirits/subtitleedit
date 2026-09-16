@@ -150,7 +150,7 @@ public class FireRedTts3AudioCpp : ITtsEngine, IPerLineCloneEngine
     /// </summary>
     public static string GetSetModelsFolder()
     {
-        var folder = Path.Combine(AudioCppRuntime.GetSetEngineFolder(), "models", "FireRedTTS3-Base-GGUF");
+        var folder = Path.Combine(Se.AudioCppModelsFolder, "FireRedTTS3-Base-GGUF");
         if (!Directory.Exists(folder))
         {
             Directory.CreateDirectory(folder);
