@@ -2693,7 +2693,8 @@ public partial class AutoTranslateViewModel : ObservableObject
             return code;
         }
 
-        if (string.Equals(savedProviderName, GoogleTranslateV1.StaticName, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(savedProviderName, GoogleTranslateV1.StaticName, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(savedProviderName, GoogleTranslateV2.StaticName, StringComparison.OrdinalIgnoreCase))
         {
             return "pt-BR";
         }
