@@ -69,6 +69,23 @@ public class McpToolsTest : IDisposable
         Assert.Contains("Missing directory", bad);
     }
 
+    [Theory]
+    [InlineData("pt-BR", "pt-BR")]
+    [InlineData("zho_Hant", "zho_Hant")]
+    [InlineData("eng", "eng")]
+    [InlineData("..\\..\\secret:track/evil", "secrettrackevil")]
+    [InlineData("../unsafe", "unsafe")]
+    [InlineData("e:n?g|*<bad>", "engbad")]
+    public void ContainerLanguageCode_CannotInjectPathComponents(string input, string expected)
+    {
+        var safe = SeConv.Core.ContainerSubtitleLoader.SanitizeLang(input);
+        Assert.Equal(expected, safe);
+        Assert.DoesNotContain('\\', safe);
+        Assert.DoesNotContain('/', safe);
+        Assert.DoesNotContain(':', safe);
+        Assert.DoesNotContain('.', safe);
+    }
+
     [Fact]
     public void PathPolicy_DeniesTraversalAndUnapprovedWrites()
     {
