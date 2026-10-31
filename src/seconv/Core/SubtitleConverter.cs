@@ -9,6 +9,10 @@ namespace SeConv.Core;
 
 internal class SubtitleConverter
 {
+    // Conversion touches process-global frame-rate and translation settings. Separate
+    // instances must not mutate these settings concurrently within the same process.
+    private static readonly SemaphoreSlim ConversionGate = new(1, 1);
+
     // Created once per run when --translate-to is set; validates the engine setup up front
     // (and, for local llama.cpp, resolves the server binary + model) so a broken translate
     // configuration fails before the first file is touched.
@@ -84,12 +88,29 @@ internal class SubtitleConverter
         }
     }
 
-    public async Task<ConversionResult> ConvertAsync(ConversionOptions options)
+    public async Task<ConversionResult> ConvertAsync(
+        ConversionOptions options, CancellationToken cancellationToken = default)
     {
+        // Check cancellation before touching any output or process-wide configuration.
+        await ConversionGate.WaitAsync(cancellationToken);
+        try
+        {
+            return await ConvertCoreAsync(options, cancellationToken);
+        }
+        finally
+        {
+            ConversionGate.Release();
+        }
+    }
+
+    private async Task<ConversionResult> ConvertCoreAsync(
+        ConversionOptions options, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
         var targets = SplitTranslateTargets(options.TranslateTo);
         if (targets.Count <= 1)
         {
-            return await ConvertSingleTargetAsync(options);
+            return await ConvertSingleTargetAsync(options, cancellationToken: cancellationToken);
         }
 
         // "--translate-to da,sv,de": one full run per language, each output named after its
@@ -107,7 +128,9 @@ internal class SubtitleConverter
         var inputFiles = GetInputFiles(options);
         foreach (var target in targets)
         {
-            var result = await ConvertSingleTargetAsync(options with { TranslateTo = target }, new List<string>(inputFiles));
+            cancellationToken.ThrowIfCancellationRequested();
+            var result = await ConvertSingleTargetAsync(
+                options with { TranslateTo = target }, new List<string>(inputFiles), cancellationToken);
             merged.TotalFiles += result.TotalFiles;
             merged.SuccessfulFiles += result.SuccessfulFiles;
             merged.FailedFiles += result.FailedFiles;
@@ -133,8 +156,11 @@ internal class SubtitleConverter
             .ToList();
     }
 
-    private async Task<ConversionResult> ConvertSingleTargetAsync(ConversionOptions options, List<string>? inputFiles = null)
+    private async Task<ConversionResult> ConvertSingleTargetAsync(
+        ConversionOptions options, List<string>? inputFiles = null,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var result = new ConversionResult();
         _usedOutputFileNames.Clear();
         _translateRunner = null;
@@ -203,6 +229,7 @@ internal class SubtitleConverter
             var fileIndex = 1;
             foreach (var inputFile in inputFiles)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 // --keep-timestamp: read the source's timestamps before anything is written, as
                 // --overwrite can make the output the input file itself.
                 var sourceTimestamps = options.KeepTimestamp ? FileTimestampHelper.Capture(inputFile) : null;
@@ -264,6 +291,7 @@ internal class SubtitleConverter
 
                         foreach (var track in tracks)
                         {
+                            cancellationToken.ThrowIfCancellationRequested();
                             var outputFile = ResolveOutputFileName(inputFile, options, AppendForcedToken(translateToSuffix ?? LanguageToken(options, track.LanguageCode), track.IsForced), track.TrackNumber, _usedOutputFileNames);
                             EnsureBurnInWritable(outputFile, options);
                             var trackLabel = track.TrackNumber.HasValue ? $"#{track.TrackNumber.Value} " : string.Empty;
@@ -287,6 +315,10 @@ internal class SubtitleConverter
                         }
                     }
                 }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
                 catch (Exception ex)
                 {
                     var msg = ErrorMessageFormatter.FormatForUser(ex, options.Verbose);
@@ -302,6 +334,10 @@ internal class SubtitleConverter
 
                 fileIndex++;
             }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
