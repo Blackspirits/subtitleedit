@@ -1302,6 +1302,21 @@ internal class SubtitleConverter
         }
     }
 
+    private static bool OutputPathOccupied(string path, ConversionOptions options)
+    {
+        if (File.Exists(path))
+        {
+            return true;
+        }
+
+        // A VobSub output is a pair. An existing .idx must trigger the same
+        // fallback as an existing .sub, even if its .sub is still absent.
+        // The MCP policy also separately validates both actual destinations.
+        return LibSEIntegration.NormalizeFormatName(options.Format).Equals("VobSub", StringComparison.OrdinalIgnoreCase) &&
+               path.EndsWith(".sub", StringComparison.OrdinalIgnoreCase) &&
+               File.Exists(Path.ChangeExtension(path, ".idx"));
+    }
+
     internal static string ResolveOutputFileName(
         string inputFile,
         ConversionOptions options,
@@ -1337,7 +1352,7 @@ internal class SubtitleConverter
             ext = extension;
         }
 
-        if ((options.Overwrite || !File.Exists(baseName)) && usedNames?.Contains(baseName) != true)
+        if ((options.Overwrite || !OutputPathOccupied(baseName, options)) && usedNames?.Contains(baseName) != true)
         {
             AuthorizeOutputPath(options, baseName);
             usedNames?.Add(baseName);
@@ -1355,7 +1370,7 @@ internal class SubtitleConverter
         {
             var fileName = Path.GetFileNameWithoutExtension(inputFile) + options.OutputFilenameAppend;
             var withTrack = Path.Combine(dir, $"{fileName}.#{trackNumber.Value}.{languageSuffix}{ext}");
-            if ((options.Overwrite || !File.Exists(withTrack)) && usedNames?.Contains(withTrack) != true)
+            if ((options.Overwrite || !OutputPathOccupied(withTrack, options)) && usedNames?.Contains(withTrack) != true)
             {
                 AuthorizeOutputPath(options, withTrack);
                 usedNames?.Add(withTrack);
@@ -1366,7 +1381,7 @@ internal class SubtitleConverter
         for (var i = 2; i < 10_000; i++)
         {
             var candidate = Path.Combine(dir, $"{stem}_{i}{ext}");
-            if (!File.Exists(candidate) && usedNames?.Contains(candidate) != true)
+            if (!OutputPathOccupied(candidate, options) && usedNames?.Contains(candidate) != true)
             {
                 AuthorizeOutputPath(options, candidate);
                 usedNames?.Add(candidate);
