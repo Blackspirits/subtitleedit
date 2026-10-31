@@ -5,6 +5,7 @@ using System.Text.Json.Serialization;
 using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
+using Nikse.SubtitleEdit.UiLogic.Export;
 using SeConv.Core;
 
 namespace SeConv.Mcp;
@@ -40,6 +41,19 @@ internal sealed class SubtitleTools
     internal static void ConfigurePathPolicy(McpPathPolicy policy)
     {
         _pathPolicy = policy;
+    }
+
+    // Keep single-file image outputs and VobSub (.sub/.idx: both are validated).
+    // All other image handlers are denied by default, including future additions.
+    internal static bool IsUnsupportedMultiFileImageTarget(string format)
+    {
+        var handler = ImageOutputWriter.TryCreateHandler(LibSEIntegration.NormalizeFormatName(format));
+        return handler is not null && handler is not (
+            ExportHandlerBluRaySup or
+            ExportHandlerDvdSup or
+            ExportHandlerVobSub or
+            ExportHandlerImscImage or
+            ExportHandlerDCinemaSmpte2014Mxf);
     }
 
     private const int DefaultReadCount = 100;
@@ -214,6 +228,17 @@ internal sealed class SubtitleTools
             // Validate every input and all possible output directories before any
             // loader, converter or write is invoked. Access denied by default.
             _pathPolicy?.RequireConversionPaths(inputs, outputFolder, outputFilename);
+
+            // Several image exporters create PNG/XML companions or output folders,
+            // not just the validated destination. Until individual output artifacts
+            // can be preflighted, do not expose those multi-file writers through MCP.
+            // This restriction does not apply to the ordinary seconv CLI.
+            if (IsUnsupportedMultiFileImageTarget(format))
+            {
+                throw new McpException(
+                    "This image format creates additional output files that the MCP path policy " +
+                    "cannot individually validate. Use the seconv CLI in a restricted directory.");
+            }
 
             var normalizedRequestedFormat = format.Replace(" ", string.Empty);
             if (normalizedRequestedFormat.Equals("customtext", StringComparison.OrdinalIgnoreCase) ||
