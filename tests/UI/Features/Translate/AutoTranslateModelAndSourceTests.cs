@@ -310,6 +310,19 @@ public class AutoTranslateModelAndSourceTests
     }
 
     [Fact]
+    public void LegacyGoogleV2BrazilianIso_MapsToBrazilianGemini()
+    {
+        var gemini = new GeminiTranslate();
+        var targets = gemini.GetSupportedTargetLanguages();
+        var english = targets.Single(p => p.Name == "English");
+        var selected = AutoTranslateViewModel.FindDefaultTargetLanguage(
+            targets, english, lastTarget: "pt", uiCultureName: "en-US",
+            savedProviderName: GoogleTranslateV2.StaticName);
+        Assert.NotNull(selected);
+        Assert.Equal("Brazilian Portuguese", selected.Name);
+    }
+
+    [Fact]
     public void SwitchTranslator_NllbChineseTraditional_StaysTraditional()
     {
         var nllb = new NoLanguageLeftBehindServe();
