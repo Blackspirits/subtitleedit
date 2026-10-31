@@ -471,7 +471,7 @@ internal class SubtitleConverter
             }
 
             int? dvdTitleNumber = options.TrackNumbers.Count == 1 ? options.TrackNumbers[0] : null;
-            var extraction = VobSubExtractor.Extract(vobFiles, outputBase, dvdTitleNumber, options.ValidateOutputPath);
+            var extraction = VobSubExtractor.Extract(vobFiles, outputBase, dvdTitleNumber, options.ValidateOutputPath, options.Overwrite);
             var outputs = extraction.Outputs;
             if (!options.Quiet)
             {
