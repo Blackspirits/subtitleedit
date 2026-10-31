@@ -310,6 +310,31 @@ public class AutoTranslateModelAndSourceTests
     }
 
     [Fact]
+    public void SwitchTranslator_NllbChineseTraditional_StaysTraditional()
+    {
+        var nllb = new NoLanguageLeftBehindServe();
+        var previous = nllb.GetSupportedTargetLanguages().Single(p => p.Code == "zho_Hant");
+        var gemini = new GeminiTranslate();
+        var next = AutoTranslateViewModel.FindSameLanguage(previous, gemini.GetSupportedTargetLanguages());
+        Assert.NotNull(next);
+        Assert.Equal("Chinese (Traditional)", next.Name);
+    }
+
+    [Theory]
+    [InlineData("pt", "PORTUGUESE (BRAZIL)", "Brazilian Portuguese")]
+    [InlineData("pt-PT", "PORTUGUESE", "Portuguese")]
+    public void SwitchTranslator_GooglePortugueseVariants_DoNotCross(string code, string name, string expected)
+    {
+        var google = new GoogleTranslateV1();
+        var previous = google.GetSupportedTargetLanguages().Single(p => p.Code == code);
+        Assert.Equal(name, previous.Name);
+        var gemini = new GeminiTranslate();
+        var next = AutoTranslateViewModel.FindSameLanguage(previous, gemini.GetSupportedTargetLanguages());
+        Assert.NotNull(next);
+        Assert.Equal(expected, next.Name);
+    }
+
+    [Fact]
     public void DetectableSource_IsStillDetected()
     {
         var lastSource = Se.Settings.AutoTranslate.AutoTranslateLastSource;
