@@ -164,8 +164,10 @@ traversal and symbolic-link escapes below approved roots are rejected.
 An output placed next to an input also requires write access to that folder.
 
 **This is a path allow-list, not an operating-system filesystem sandbox.**
+Known VobSub `.sub`/`.idx` and DVD `.IFO`/`.VOB` companions are checked,
+and resolved output destinations (including collision suffixes) are validated before writes.
 There is still a possible check/use race for filesystem objects that another
-process can mutate, and some format loaders may inspect companion files.
+process can mutate, and other format loaders may inspect additional companion files.
 Run the server with least-privilege OS permissions and use your MCP client's
 tool-approval and sandbox policies. Do not approve sensitive home directories
 or entire drives unless access is genuinely intended.
