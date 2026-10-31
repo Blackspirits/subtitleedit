@@ -242,6 +242,16 @@ internal sealed class SubtitleTools
                     "cannot individually validate. Use the seconv CLI in a restricted directory.");
             }
 
+            // The VobSub writer derives its .idx companion by replacing the
+            // last three filename characters. An arbitrary explicit extension
+            // could make that secondary write bypass the validated .sub/.idx pair.
+            if (LibSEIntegration.NormalizeFormatName(format).Equals("VobSub", StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrWhiteSpace(outputFilename) &&
+                !outputFilename.EndsWith(".sub", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new McpException("VobSub outputFilename must end with .sub so the companion .idx path can be validated.");
+            }
+
             var normalizedRequestedFormat = format.Replace(" ", string.Empty);
             if (normalizedRequestedFormat.Equals("customtext", StringComparison.OrdinalIgnoreCase) ||
                 normalizedRequestedFormat.Equals("customtextformat", StringComparison.OrdinalIgnoreCase))
