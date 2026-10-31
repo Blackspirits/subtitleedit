@@ -181,7 +181,7 @@ public class AutoTranslateModelAndSourceTests
     {
         var translator = new GoogleTranslateV1();
         var targets = translator.GetSupportedTargetLanguages();
-        var source = translator.GetSupportedSourceLanguages().First(p => p.Name == "English");
+        var source = translator.GetSupportedSourceLanguages().First(p => p.Code == "en");
 
         var selected = AutoTranslateViewModel.FindDefaultTargetLanguage(
             targets,
