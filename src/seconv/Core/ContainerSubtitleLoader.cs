@@ -1008,6 +1008,13 @@ internal static class ContainerSubtitleLoader
         {
             return string.Empty;
         }
-        return lang.RemoveChar('?').RemoveChar('!').RemoveChar('*').RemoveChar(',').RemoveChar('/').Trim();
+
+        // The container's language metadata is untrusted and also becomes an
+        // output-file suffix. Keep language subtags, but never allow path
+        // separators, Windows alternate-stream syntax or other filename
+        // metacharacters to escape the selected output directory.
+        return new string(lang.Trim()
+            .Where(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_')
+            .ToArray());
     }
 }
