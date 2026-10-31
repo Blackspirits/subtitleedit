@@ -190,7 +190,7 @@ public class AutoTranslateModelAndSourceTests
             uiCultureName: "en-US");
 
         Assert.NotNull(selected);
-        Assert.Contains(selected.Code, new[] { "zh-CN", "zh" });
+        Assert.Equal("zh-CN", selected.Code);
     }
 
     [Fact]
@@ -208,6 +208,105 @@ public class AutoTranslateModelAndSourceTests
 
         Assert.NotNull(selected);
         Assert.Equal("French", selected.Name);
+    }
+
+    [Fact]
+    public void RememberLanguageCodes_PreservesNllbScriptAfterTranslation()
+    {
+        var previousSource = Se.Settings.AutoTranslate.AutoTranslateLastSource;
+        var previousTarget = Se.Settings.AutoTranslate.AutoTranslateLastTarget;
+        try
+        {
+            var engine = new NoLanguageLeftBehindServe();
+            var languages = engine.GetSupportedTargetLanguages();
+            var source = languages.Single(p => p.Code == "eng_Latn");
+            var target = languages.Single(p => p.Code == "zho_Hant");
+
+            Assert.Equal("zh", target.TwoLetterIsoLanguageName);
+            AutoTranslateViewModel.RememberLanguageCodes(source, target);
+            Assert.Equal("eng_Latn", Se.Settings.AutoTranslate.AutoTranslateLastSource);
+            Assert.Equal("zho_Hant", Se.Settings.AutoTranslate.AutoTranslateLastTarget);
+        }
+        finally
+        {
+            Se.Settings.AutoTranslate.AutoTranslateLastSource = previousSource;
+            Se.Settings.AutoTranslate.AutoTranslateLastTarget = previousTarget;
+        }
+    }
+
+    [Fact]
+    public void OldAmbiguousChineseIso_DoesNotGuessNllbSimplified()
+    {
+        var nllb = new NoLanguageLeftBehindServe();
+        var languages = nllb.GetSupportedTargetLanguages();
+        var english = languages.Single(p => p.Code == "eng_Latn");
+        var result = AutoTranslateViewModel.FindDefaultTargetLanguage(
+            languages, english, lastTarget: "zh", uiCultureName: "en-US");
+
+        Assert.NotNull(result);
+        Assert.NotEqual("zho_Hans", result.Code);
+        Assert.NotEqual("zho_Hant", result.Code);
+    }
+
+    [Theory]
+    [InlineData("zh-TW", "Chinese (Traditional)")]
+    [InlineData("zh-CN", "Chinese (Simplified)")]
+    [InlineData("pt-PT", "Portuguese")]
+    [InlineData("pt-BR", "Brazilian Portuguese")]
+    [InlineData("arb_Arab", "Arabic")]
+    [InlineData("pes_Arab", "Persian")]
+    [InlineData("zsm_Latn", "Malay")]
+    [InlineData("yue_Hant", "Cantonese")]
+    public void CrossProviderIdentifiers_MapToGemini(string previousCode, string expected)
+    {
+        var engine = new GeminiTranslate();
+        var targets = engine.GetSupportedTargetLanguages();
+        var english = targets.Single(p => p.Name == "English");
+        var selected = AutoTranslateViewModel.FindDefaultTargetLanguage(
+            targets, english, previousCode, uiCultureName: "en-US");
+        Assert.NotNull(selected);
+        Assert.Equal(expected, selected.Name);
+    }
+
+    [Theory]
+    [InlineData("zh-TW", "zho_Hant")]
+    [InlineData("zh-CN", "zho_Hans")]
+    [InlineData("pt-PT", "por_Latn")]
+    public void GoogleVariants_MapToNllb(string previousCode, string expected)
+    {
+        var engine = new NoLanguageLeftBehindServe();
+        var targets = engine.GetSupportedTargetLanguages();
+        var english = targets.Single(p => p.Code == "eng_Latn");
+        var selected = AutoTranslateViewModel.FindDefaultTargetLanguage(
+            targets, english, previousCode, uiCultureName: "en-US");
+        Assert.NotNull(selected);
+        Assert.Equal(expected, selected.Code);
+    }
+
+    [Fact]
+    public void LegacyGeminiPortugueseIso_MapsToEuropeanGoogle_NotBrazilian()
+    {
+        var google = new GoogleTranslateV1();
+        var targets = google.GetSupportedTargetLanguages();
+        var english = targets.Single(p => p.Code == "en");
+        var selected = AutoTranslateViewModel.FindDefaultTargetLanguage(
+            targets, english, lastTarget: "pt", uiCultureName: "en-US",
+            savedProviderName: GeminiTranslate.StaticName);
+        Assert.NotNull(selected);
+        Assert.Equal("pt-PT", selected.Code);
+    }
+
+    [Fact]
+    public void LegacyGoogleBrazilianIso_RemainsBrazilian()
+    {
+        var google = new GoogleTranslateV1();
+        var targets = google.GetSupportedTargetLanguages();
+        var english = targets.Single(p => p.Code == "en");
+        var selected = AutoTranslateViewModel.FindDefaultTargetLanguage(
+            targets, english, lastTarget: "pt", uiCultureName: "en-US",
+            savedProviderName: GoogleTranslateV1.StaticName);
+        Assert.NotNull(selected);
+        Assert.Equal("pt", selected.Code);
     }
 
     [Fact]
