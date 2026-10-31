@@ -1931,9 +1931,28 @@ public partial class AutoTranslateViewModel : ObservableObject
             return null;
         }
 
-        return FindLanguage(languages, previous.Name)
-               ?? FindLanguage(languages, previous.Code)
-               ?? FindLanguage(languages, previous.TwoLetterIsoLanguageName);
+        var byName = FindLanguage(languages, previous.Name);
+        if (byName != null)
+        {
+            return byName;
+        }
+
+        var byCode = FindLanguage(languages, previous.Code);
+        if (byCode != null)
+        {
+            return byCode;
+        }
+
+        // The full code is explicit about a script/region. Falling back to a bare ISO
+        // value would silently turn e.g. NLLB Romanized Arabic into Arabic script.
+        var previousCode = previous.Code ?? string.Empty;
+        if (previousCode.Contains('_') || previousCode.StartsWith("zh-", StringComparison.OrdinalIgnoreCase) ||
+            previousCode.StartsWith("pt-", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return FindLanguage(languages, previous.TwoLetterIsoLanguageName);
     }
 
     partial void OnSelectedTargetLanguageChanged(TranslationPair? value)
@@ -2688,6 +2707,12 @@ public partial class AutoTranslateViewModel : ObservableObject
         return code; // Historical codes without a known provider are inherently ambiguous.
     }
 
+    // Only documented NLLB script-qualified codes can be reduced to a generic ISO code.
+    // The lookup is lazy because most providers match a code/name without the NLLB fallback.
+    private static readonly Lazy<HashSet<string>> KnownNllbLanguageCodes = new(() =>
+        new HashSet<string>(new NoLanguageLeftBehindServe().GetSupportedTargetLanguages()
+            .Select(p => NormalizeLanguageIdentifier(p.Code)), StringComparer.OrdinalIgnoreCase));
+
     // Deliberately no lossy lookup of a script-qualified language by its bare ISO prefix.
     // Mapped aliases are only accepted when they pick exactly one current-provider entry.
     internal static TranslationPair? FindLanguage(IList<TranslationPair> languages, string? codeOrName)
@@ -2782,11 +2807,15 @@ public partial class AutoTranslateViewModel : ObservableObject
             return null;
         }
 
-        // Prefix conversion must not discard an unknown writing system. If an identifier
-        // specifies an unrecognised script/region, only direct or known-group matches work.
-        if (dash >= 0 && (iso == "zh" || iso == "ks") &&
-            !identifier.Equals("kas-Arab", StringComparison.OrdinalIgnoreCase) &&
-            !identifier.Equals("kas-Deva", StringComparison.OrdinalIgnoreCase))
+        // A three-letter prefix alone cannot preserve an explicitly selected writing
+        // system. For NLLB languages with more than one script, a generic provider code
+        // is not proof of script compatibility. Keep only native-script Arabic as a
+        // deliberate, unambiguous exception (arb_Arab -> ar); let the UI choose another
+        // default rather than silently turning Romanized Arabic into Arabic script.
+        if (dash >= 0 &&
+            (!KnownNllbLanguageCodes.Value.Contains(identifier) ||
+             prefix is "ace" or "bjn" or "kas" or "knc" or "min" or "taq" or "zho" ||
+             (prefix == "arb" && !identifier.Equals("arb-Arab", StringComparison.OrdinalIgnoreCase))))
         {
             return null;
         }
