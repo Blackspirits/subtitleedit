@@ -284,6 +284,34 @@ public class McpToolsTest : IDisposable
     }
 
     [Fact]
+    public async Task ConvertSubtitle_CancelledWhileQueued_WritesNothing()
+    {
+        var gate = (SemaphoreSlim)typeof(SubtitleTools).GetField(
+            "ToolGate", System.Reflection.BindingFlags.NonPublic |
+                        System.Reflection.BindingFlags.Static)!.GetValue(null)!;
+
+        await gate.WaitAsync(TestContext.Current.CancellationToken);
+        try
+        {
+            using var cts = new CancellationTokenSource();
+            var conversion = SubtitleTools.ConvertSubtitle(
+                inputs: [Fixtures.Path("test.srt")],
+                format: "srt",
+                outputFolder: _tempDir,
+                cancellationToken: cts.Token);
+
+            Assert.False(conversion.IsCompleted);
+            cts.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => conversion);
+            Assert.Empty(Directory.GetFiles(_tempDir));
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    [Fact]
     public async Task ConvertSubtitle_PreCancelledToken_ThrowsWithoutWriting()
     {
         using var cts = new CancellationTokenSource();
