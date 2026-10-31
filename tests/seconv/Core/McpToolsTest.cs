@@ -196,6 +196,29 @@ public class McpToolsTest : IDisposable
     }
 
     [Fact]
+    public void PathPolicy_RejectsInputPathsDisguisedByLeadingWhitespace()
+    {
+        var cwd = Directory.GetCurrentDirectory();
+        var outside = Path.Combine(_tempDir, "private.srt");
+        File.WriteAllText(outside, "1\n00:00:01,000 --> 00:00:02,000\nPrivate.\n");
+
+        // GetInputFiles trims patterns before resolving roots. A leading space
+        // must not make this absolute path appear relative to the allowed cwd.
+        var policy = new McpPathPolicy([cwd], [cwd]);
+        foreach (var disguised in new[] { " " + outside, "\t" + outside, " " + outside + " " })
+        {
+            Assert.Throws<ModelContextProtocol.McpException>(() =>
+                policy.RequireReadPattern(disguised));
+            Assert.Throws<ModelContextProtocol.McpException>(() =>
+                policy.RequireConversionPaths([disguised], cwd, null));
+        }
+
+        // Whitespace around a genuinely approved absolute path remains usable.
+        var local = Path.Combine(cwd, "source.srt");
+        policy.RequireReadPattern(" " + local + " ");
+    }
+
+    [Fact]
     public void PathPolicy_RejectsLegacyCommaPatternSplitting()
     {
         var cwd = Directory.GetCurrentDirectory();
