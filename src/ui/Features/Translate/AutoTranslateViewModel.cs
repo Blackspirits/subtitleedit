@@ -2593,7 +2593,8 @@ public partial class AutoTranslateViewModel : ObservableObject
         {
             // The detector returns generic ISO codes. A provider may now expose only
             // region-specific entries, e.g. pt-PT and pt-BR with no bare "pt".
-            var resolved = ResolveDetectedSourceLanguage(detected, sourceLanguages, previousLanguage);
+            var resolved = ResolveDetectedSourceLanguage(
+                detected, sourceLanguages, previousLanguage, Se.Language.CultureName);
             if (resolved != null)
             {
                 return resolved.Code;
@@ -2609,7 +2610,8 @@ public partial class AutoTranslateViewModel : ObservableObject
     }
 
     internal static TranslationPair? ResolveDetectedSourceLanguage(
-        string detected, IList<TranslationPair> languages, TranslationPair? previousLanguage)
+        string detected, IList<TranslationPair> languages, TranslationPair? previousLanguage,
+        string? uiCultureName = null)
     {
         if (string.IsNullOrWhiteSpace(detected))
         {
@@ -2641,6 +2643,44 @@ public partial class AutoTranslateViewModel : ObservableObject
         if (match != null)
         {
             return match;
+        }
+
+        if (detected.Equals("pt", StringComparison.OrdinalIgnoreCase))
+        {
+            // A language detector cannot distinguish European from Brazilian Portuguese.
+            // If this provider has no neutral "pt" entry, prefer the configured UI region.
+            // Otherwise retain the provider's generic NLLB Portuguese entry, or fall back
+            // to its original "Portuguese" (pt-PT) option rather than incorrectly claiming
+            // the source is English. The user may still choose the other region explicitly.
+            var generic = languages.FirstOrDefault(p =>
+                p.Code.Equals("por_Latn", StringComparison.OrdinalIgnoreCase));
+            if (generic != null)
+            {
+                return generic;
+            }
+
+            if (!string.IsNullOrWhiteSpace(uiCultureName))
+            {
+                if (uiCultureName.Equals("pt-BR", StringComparison.OrdinalIgnoreCase))
+                {
+                    var brazilian = FindLanguage(languages, "pt-BR");
+                    if (brazilian != null)
+                    {
+                        return brazilian;
+                    }
+                }
+                else if (uiCultureName.Equals("pt-PT", StringComparison.OrdinalIgnoreCase))
+                {
+                    var european = FindLanguage(languages, "pt-PT");
+                    if (european != null)
+                    {
+                        return european;
+                    }
+                }
+            }
+
+            return FindLanguage(languages, "pt-PT") ??
+                   FindLanguage(languages, "pt-BR");
         }
 
         // A detected language may not use the same code as the current translator.
