@@ -154,6 +154,48 @@ public class McpToolsTest : IDisposable
     }
 
     [Fact]
+    public void PathPolicy_RejectsUnauthorizedVobSubCompanionFiles()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            // Symlink creation requires developer mode or elevated rights on Windows.
+            return;
+        }
+
+        var root = Path.Combine(_tempDir, "allowed-vobsub");
+        var outside = Path.Combine(_tempDir, "outside-vobsub");
+        Directory.CreateDirectory(root);
+        Directory.CreateDirectory(outside);
+        var idx = Path.Combine(root, "movie.idx");
+        var sub = Path.Combine(root, "movie.sub");
+        var privateSub = Path.Combine(outside, "private.sub");
+        var privateIdx = Path.Combine(outside, "private.idx");
+        File.WriteAllText(idx, "index");
+        File.WriteAllText(privateSub, "private images");
+        File.WriteAllText(privateIdx, "private index");
+        File.CreateSymbolicLink(sub, privateSub);
+
+        var policy = new McpPathPolicy([root], [root]);
+        policy.RequireRead(idx); // The requested .idx is safe by itself.
+        Assert.Throws<ModelContextProtocol.McpException>(() =>
+            policy.RequireReadWithCompanions(idx));
+        Assert.Throws<ModelContextProtocol.McpException>(() =>
+            policy.RequireReadPattern(idx));
+        Assert.Throws<ModelContextProtocol.McpException>(() =>
+            policy.RequireReadPattern(Path.Combine(root, "*.idx")));
+
+        File.Delete(sub);
+        File.WriteAllText(sub, "local images");
+        File.Delete(idx);
+        File.CreateSymbolicLink(idx, privateIdx);
+        policy.RequireRead(sub); // The requested .sub is safe by itself.
+        Assert.Throws<ModelContextProtocol.McpException>(() =>
+            policy.RequireReadWithCompanions(sub));
+        Assert.Throws<ModelContextProtocol.McpException>(() =>
+            policy.RequireReadPattern(Path.Combine(root, "*.sub")));
+    }
+
+    [Fact]
     public void ListFormats_FilterMatchesIdNameAndExtension()
     {
         var all = Payload(SubtitleTools.ListFormats());
