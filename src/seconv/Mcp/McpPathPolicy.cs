@@ -122,6 +122,16 @@ internal sealed class McpPathPolicy
             throw new McpException("An authorized filesystem path is required.");
         }
 
+        // Do not normalize away parent-directory components before checking
+        // symlinks. On some systems, "allowed/link/../file" can resolve through
+        // the link target before ".." is applied. The OS and Path.GetFullPath
+        // need not interpret that sequence in exactly the same way.
+        if (path.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                StringSplitOptions.RemoveEmptyEntries).Any(component => component == ".."))
+        {
+            throw new McpException("Parent-directory traversal is not permitted in MCP paths.");
+        }
+
         string absolute;
         try
         {
