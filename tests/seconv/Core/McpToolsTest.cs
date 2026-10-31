@@ -481,5 +481,27 @@ public class McpToolsTest : IDisposable
             new Dictionary<string, object?> { ["path"] = output },
             cancellationToken: ct);
         Assert.Equal("WebVTT", Payload(afterConversion).GetProperty("format").GetString());
+
+        // The same live stdio server must refuse both reading outside its
+        // configured roots and writing back into a read-only fixture folder.
+        var outside = Path.Combine(Path.GetDirectoryName(_tempDir)!, "unapproved-folder",
+            "not-authorized.srt");
+        var deniedRead = await client.CallToolAsync("subtitle_info",
+            new Dictionary<string, object?> { ["path"] = outside },
+            cancellationToken: ct);
+        Assert.Contains("outside the MCP-approved directories", ErrorText(deniedRead));
+
+        var deniedWrite = await client.CallToolAsync("convert_subtitle",
+            new Dictionary<string, object?>
+            {
+                ["inputs"] = new[] { Fixtures.Path("test.srt") },
+                ["format"] = "WebVTT",
+                ["outputFilename"] = Path.Combine(
+                    Path.GetDirectoryName(Fixtures.Path("test.srt"))!, "denied-write.vtt"),
+            },
+            cancellationToken: ct);
+        Assert.Contains("outside the MCP-approved directories", ErrorText(deniedWrite));
+        Assert.False(File.Exists(Path.Combine(
+            Path.GetDirectoryName(Fixtures.Path("test.srt"))!, "denied-write.vtt")));
     }
 }
