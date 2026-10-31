@@ -60,7 +60,7 @@ internal sealed class SubtitleTools
     private const int MaxReadCount = 1000;
 
     [McpServerTool(Name = "list_formats", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
-    [Description("List the subtitle formats seconv can read and write. 'id' is the exact value convert_subtitle's 'format' parameter accepts; 'inputOnly' formats can be read but not written.")]
+    [Description("List subtitle engine formats. 'inputOnly' means not writable; 'mcpOutputSupported' also excludes image targets that generate unchecked sidecar files.")]
     public static CallToolResult ListFormats(
         [Description("Optional case-insensitive substring matched against id, name and extension (e.g. 'srt', 'ebu', 'vtt'). Omit to list everything.")] string? filter = null,
         CancellationToken cancellationToken = default)
@@ -74,6 +74,8 @@ internal sealed class SubtitleTools
                     extension = entry.Format.Extension,
                     type = entry.Kind.StartsWith("binary", StringComparison.Ordinal) ? "binary" : "text",
                     inputOnly = entry.Kind.Contains("(input)", StringComparison.Ordinal),
+                    mcpOutputSupported = !entry.Kind.Contains("(input)", StringComparison.Ordinal) &&
+                                         !IsUnsupportedMultiFileImageTarget(entry.Format.Name),
                 })
                 .Where(f => string.IsNullOrWhiteSpace(filter) ||
                             f.id.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
@@ -85,7 +87,8 @@ internal sealed class SubtitleTools
             {
                 total = formats.Count,
                 formats,
-                extraIds = new[] { "plaintext", "bluraysup", "vobsub", "bdnxml" },
+                extraIds = new[] { "plaintext", "bluraysup", "vobsub" },
+                note = "MCP disallows image outputs with unchecked PNG/XML companions; use the CLI for those formats.",
             };
         }, cancellationToken);
 
@@ -184,7 +187,7 @@ internal sealed class SubtitleTools
         }, cancellationToken);
 
     [McpServerTool(Name = "convert_subtitle", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false)]
-    [Description("Convert one or more subtitle files to another format using a focused subset of seconv's CLI options, including timing changes, track selection, OCR and cleanup operations. Writes output files next to the inputs unless outputFolder is given; existing files are never overwritten unless overwrite is true. Multi-file failures or cancellation can occur after earlier outputs were completed, so inspect returned per-file results and existing outputs before retrying. For advanced CLI-only controls such as translation, image styling, custom formats or settings overlays, use seconv directly.")]
+    [Description("Convert subtitles using a focused subset of seconv CLI options, including timing, OCR and cleanup. Image formats generating unvalidated companion files are not supported by MCP. Writes next to inputs unless outputFolder is provided; existing files are never overwritten unless overwrite is true. Failed or cancelled batches can leave earlier outputs. Use the CLI for advanced options.")]
     public static Task<CallToolResult> ConvertSubtitle(
         [Description("Input file paths or glob patterns (e.g. 'C:/subs/*.srt'). Containers (.mkv/.mp4/.ts/.avi) and image-based subtitles (.sup, .sub+.idx) are accepted too.")] string[] inputs,
         [Description("Target format id from list_formats (e.g. 'SubRip', 'WebVTT', 'AdvancedSubStationAlpha'); short aliases such as 'srt', 'vtt', 'ass', 'ebu' and 'plaintext' also work.")] string format,
