@@ -82,7 +82,7 @@ internal sealed class SubtitleTools
         CancellationToken cancellationToken = default)
         => Run(() =>
         {
-            _pathPolicy?.RequireRead(path);
+            _pathPolicy?.RequireReadWithCompanions(path);
             return SubtitleInfoGatherer.Gather(path);
         }, cancellationToken);
 
@@ -96,7 +96,7 @@ internal sealed class SubtitleTools
         CancellationToken cancellationToken = default)
         => Run(() =>
         {
-            _pathPolicy?.RequireRead(path);
+            _pathPolicy?.RequireReadWithCompanions(path);
             var (subtitle, format) = LibSEIntegration.LoadSubtitleWithFormat(path, encoding);
             var total = subtitle.Paragraphs.Count;
             var first = Math.Max(1, start);
@@ -135,7 +135,7 @@ internal sealed class SubtitleTools
         CancellationToken cancellationToken = default)
         => Run(() =>
         {
-            _pathPolicy?.RequireRead(path);
+            _pathPolicy?.RequireReadWithCompanions(path);
             return SubtitleLinter.Lint(path);
         }, cancellationToken);
 
