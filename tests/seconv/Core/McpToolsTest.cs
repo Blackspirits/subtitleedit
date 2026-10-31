@@ -112,12 +112,20 @@ public class McpToolsTest : IDisposable
         Directory.CreateDirectory(outside);
         var link = Path.Combine(root, "link");
         Directory.CreateSymbolicLink(link, outside);
+        var privateFile = Path.Combine(outside, "private.srt");
+        File.WriteAllText(privateFile, "Private subtitles");
+        var fileLink = Path.Combine(root, "escape.srt");
+        File.CreateSymbolicLink(fileLink, privateFile);
         var policy = new McpPathPolicy([root], [root]);
 
         Assert.Throws<ModelContextProtocol.McpException>(() =>
             policy.RequireRead(Path.Combine(link, "private.srt")));
         Assert.Throws<ModelContextProtocol.McpException>(() =>
             policy.RequireWrite(Path.Combine(link, "changed.srt")));
+        Assert.Throws<ModelContextProtocol.McpException>(() =>
+            policy.RequireRead(fileLink));
+        Assert.Throws<ModelContextProtocol.McpException>(() =>
+            policy.RequireReadPattern(Path.Combine(root, "*.srt")));
     }
 
     [Fact]
