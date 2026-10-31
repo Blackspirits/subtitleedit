@@ -2715,6 +2715,50 @@ public partial class AutoTranslateViewModel : ObservableObject
             return null;
         }
 
+        // Keep Chinese script variants when moving away from an NLLB engine. NLLB uses
+        // zho_Hans / zho_Hant, whereas Google-style providers use zh-CN / zh-Hant
+        // (or zh-TW) and LLM engines use descriptive language names. A generic "zh"
+        // match would silently choose a potentially wrong script.
+        if (twoLetter.Equals("zh", StringComparison.OrdinalIgnoreCase) && separatorIndex > 0)
+        {
+            var script = normalized[(separatorIndex + 1)..];
+            string[] variants;
+            if (script.Equals("Hans", StringComparison.OrdinalIgnoreCase))
+            {
+                variants = ["zh-Hans", "zh-CN", "Chinese (Simplified)"];
+            }
+            else if (script.Equals("Hant", StringComparison.OrdinalIgnoreCase))
+            {
+                variants = ["zh-Hant", "zh-TW", "Chinese (Traditional)"];
+            }
+            else
+            {
+                return null; // Unknown script: never silently select another variant.
+            }
+
+            foreach (var variant in variants)
+            {
+                var matches = languages
+                    .Where(p => variant.Equals(p.Code, StringComparison.OrdinalIgnoreCase) ||
+                                variant.Equals(p.Name, StringComparison.OrdinalIgnoreCase) ||
+                                variant.Equals(p.TwoLetterIsoLanguageName, StringComparison.OrdinalIgnoreCase))
+                    .Take(2)
+                    .ToList();
+
+                if (matches.Count == 1)
+                {
+                    return matches[0];
+                }
+
+                if (matches.Count > 1)
+                {
+                    return null; // Multiple matching variants: do not guess.
+                }
+            }
+
+            return null; // Script-qualified source cannot fall back to generic Chinese.
+        }
+
         englishName = Iso639Dash2LanguageCode.List
             .FirstOrDefault(l => l.TwoLetterCode.Equals(twoLetter, StringComparison.OrdinalIgnoreCase))?.EnglishName;
         if (englishName != null)
