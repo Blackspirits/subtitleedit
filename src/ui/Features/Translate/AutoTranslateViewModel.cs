@@ -2581,29 +2581,12 @@ public partial class AutoTranslateViewModel : ObservableObject
 
         if (!string.IsNullOrEmpty(detected))
         {
-            // A short ISO identifier is not necessarily a valid code for the current engine.
-            var match = FindLanguage(sourceLanguages, detected);
-            if (match != null)
+            // The detector returns generic ISO codes. A provider may now expose only
+            // region-specific entries, e.g. pt-PT and pt-BR with no bare "pt".
+            var resolved = ResolveDetectedSourceLanguage(detected, sourceLanguages, previousLanguage);
+            if (resolved != null)
             {
-                // If the detector only established generic Chinese, retain the last known
-                // Chinese script rather than overwriting it with an ambiguous "zh".
-                if (previousLanguage != null &&
-                    ((detected.Equals("zh", StringComparison.OrdinalIgnoreCase) &&
-                      previousLanguage.TwoLetterIsoLanguageName.Equals("zh", StringComparison.OrdinalIgnoreCase)) ||
-                     (detected.Equals("pt", StringComparison.OrdinalIgnoreCase) &&
-                      (previousLanguage.TwoLetterIsoLanguageName.Equals("pt", StringComparison.OrdinalIgnoreCase) ||
-                       previousLanguage.TwoLetterIsoLanguageName.StartsWith("pt-", StringComparison.OrdinalIgnoreCase)))))
-                {
-                    return previousLanguage.Code;
-                }
-                return match.Code;
-            }
-
-            // If detection found a language but not a reliable script/provider variant, prefer
-            // a compatible saved choice over the alphabetically first list entry.
-            if (previousLanguage != null && detected.Equals(previousLanguage.TwoLetterIsoLanguageName, StringComparison.OrdinalIgnoreCase))
-            {
-                return previousLanguage.Code;
+                return resolved.Code;
             }
         }
         else if (previousLanguage != null)
@@ -2613,6 +2596,48 @@ public partial class AutoTranslateViewModel : ObservableObject
 
         // Unknown/ambiguous detection: English is safer than selecting Abkhaz/Acehnese by index.
         return FindLanguage(sourceLanguages, "en")?.Code ?? string.Empty;
+    }
+
+    internal static TranslationPair? ResolveDetectedSourceLanguage(
+        string detected, IList<TranslationPair> languages, TranslationPair? previousLanguage)
+    {
+        if (string.IsNullOrWhiteSpace(detected))
+        {
+            return null;
+        }
+
+        // Generic detection must not discard a previously selected region or script.
+        // Check before FindLanguage: Google includes a generic "zh" entry but now uses
+        // explicit pt-PT/pt-BR entries, neither of which matches a bare detected "pt".
+        if (previousLanguage != null &&
+            ((detected.Equals("pt", StringComparison.OrdinalIgnoreCase) &&
+              (previousLanguage.Code.Equals("pt", StringComparison.OrdinalIgnoreCase) ||
+               previousLanguage.Code.StartsWith("pt-", StringComparison.OrdinalIgnoreCase) ||
+               previousLanguage.Code.Equals("por_Latn", StringComparison.OrdinalIgnoreCase) ||
+               previousLanguage.Name.Equals("Portuguese", StringComparison.OrdinalIgnoreCase) ||
+               previousLanguage.Name.Equals("Brazilian Portuguese", StringComparison.OrdinalIgnoreCase) ||
+               previousLanguage.Name.Equals("PORTUGUESE (BRAZIL)", StringComparison.OrdinalIgnoreCase))) ||
+             (detected.Equals("zh", StringComparison.OrdinalIgnoreCase) &&
+              (previousLanguage.Code.Equals("zh", StringComparison.OrdinalIgnoreCase) ||
+               previousLanguage.Code.StartsWith("zh-", StringComparison.OrdinalIgnoreCase) ||
+               previousLanguage.Code.Equals("zho_Hans", StringComparison.OrdinalIgnoreCase) ||
+               previousLanguage.Code.Equals("zho_Hant", StringComparison.OrdinalIgnoreCase) ||
+               previousLanguage.TwoLetterIsoLanguageName.Equals("zh", StringComparison.OrdinalIgnoreCase)))))
+        {
+            return previousLanguage;
+        }
+
+        var match = FindLanguage(languages, detected);
+        if (match != null)
+        {
+            return match;
+        }
+
+        // A detected language may not use the same code as the current translator.
+        return previousLanguage != null &&
+               detected.Equals(previousLanguage.TwoLetterIsoLanguageName, StringComparison.OrdinalIgnoreCase)
+            ? previousLanguage
+            : null;
     }
 
     /// <summary>
