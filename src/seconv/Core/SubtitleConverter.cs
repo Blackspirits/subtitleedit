@@ -433,6 +433,8 @@ internal class SubtitleConverter
             outputBase = Path.Combine(outputFolder, stem + ".sub");
         }
 
+        AuthorizeOutputPath(options, outputBase);
+
         // Overwrite check is best-effort against the base path. Multi-stream DVDs land
         // additional outputs at <stem>.<n>.sub which we can't predict without parsing —
         // those existing files will be overwritten silently. Acceptable for now since
@@ -469,7 +471,7 @@ internal class SubtitleConverter
             }
 
             int? dvdTitleNumber = options.TrackNumbers.Count == 1 ? options.TrackNumbers[0] : null;
-            var extraction = VobSubExtractor.Extract(vobFiles, outputBase, dvdTitleNumber);
+            var extraction = VobSubExtractor.Extract(vobFiles, outputBase, dvdTitleNumber, options.ValidateOutputPath);
             var outputs = extraction.Outputs;
             if (!options.Quiet)
             {
@@ -1290,6 +1292,17 @@ internal class SubtitleConverter
     /// with --overwrite a --translate-to run writes back to the input's own name (#15156),
     /// without it the counter keeps the input safe.
     /// </summary>
+    private static void AuthorizeOutputPath(ConversionOptions options, string path)
+    {
+        // The MCP's access policy must inspect the *actual* destination selected
+        // after collision and track suffix resolution, not merely the client input.
+        options.ValidateOutputPath?.Invoke(path);
+        if (path.EndsWith(".sub", StringComparison.OrdinalIgnoreCase))
+        {
+            options.ValidateOutputPath?.Invoke(Path.ChangeExtension(path, ".idx"));
+        }
+    }
+
     internal static string ResolveOutputFileName(
         string inputFile,
         ConversionOptions options,
@@ -1327,6 +1340,7 @@ internal class SubtitleConverter
 
         if ((options.Overwrite || !File.Exists(baseName)) && usedNames?.Contains(baseName) != true)
         {
+            AuthorizeOutputPath(options, baseName);
             usedNames?.Add(baseName);
             return baseName;
         }
@@ -1344,6 +1358,7 @@ internal class SubtitleConverter
             var withTrack = Path.Combine(dir, $"{fileName}.#{trackNumber.Value}.{languageSuffix}{ext}");
             if ((options.Overwrite || !File.Exists(withTrack)) && usedNames?.Contains(withTrack) != true)
             {
+                AuthorizeOutputPath(options, withTrack);
                 usedNames?.Add(withTrack);
                 return withTrack;
             }
@@ -1354,6 +1369,7 @@ internal class SubtitleConverter
             var candidate = Path.Combine(dir, $"{stem}_{i}{ext}");
             if (!File.Exists(candidate) && usedNames?.Contains(candidate) != true)
             {
+                AuthorizeOutputPath(options, candidate);
                 usedNames?.Add(candidate);
                 return candidate;
             }
@@ -1396,6 +1412,8 @@ internal record class ConversionOptions
     public string? InputFolder { get; init; }
     public string? OutputFolder { get; init; }
     public string? OutputFilename { get; init; }
+    // Internal MCP-only validation hook. Ordinary CLI conversions remain unchanged.
+    public Action<string>? ValidateOutputPath { get; init; }
     public string? Encoding { get; init; }
 
     /// <summary>
