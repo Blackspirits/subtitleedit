@@ -80,7 +80,7 @@ public class SubtitleConverterCancellationTest : IDisposable
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
         var task = (Task)method.Invoke(new SubtitleConverter(),
             [subtitle, new Nikse.SubtitleEdit.Core.SubtitleFormats.SubRip(),
-                output, new ConversionOptions { Format = "SubRip", Overwrite = true }, cts.Token])!;
+                output, new ConversionOptions { Patterns = [], Format = "SubRip", Overwrite = true }, cts.Token])!;
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
         Assert.Equal("ORIGINAL CONTENT", await File.ReadAllTextAsync(output, TestContext.Current.CancellationToken));
