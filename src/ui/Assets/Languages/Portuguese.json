@@ -1,6 +1,6 @@
 {
   "title": "Subtitle Edit",
-  "version": "v5.4.0-beta11",
+  "version": "v5.4.0-beta12",
   "translatedBy": "Hugo Carvalho (hugok79) e Filipe Mota (BlackSpirits)\nE-mail: hugokarvalho@hotmail.com / blackspirits@gmail.com\nAntigo tradutor: Marco Barbosa (moob)",
   "cultureName": "pt-PT",
   "general": {
@@ -3485,7 +3485,8 @@
     "customPromptHint": "Instruções personalizadas ({0} = idioma de origem, {1} = idioma de destino); vazio = instrução integrada",
     "editTranslationHint": "Clique na tradução da linha selecionada para a editar (Enter guarda, Escape cancela)",
     "llamaCppDownloadEngineAndModelPrompt": "O llama.cpp requer a transferência do motor llama-server e de um modelo de tradução. Transferir agora?",
-    "llamaCppDownloadModelPrompt": "O llama.cpp requer a transferência do modelo de tradução selecionado. Transferir agora?"
+    "llamaCppDownloadModelPrompt": "O llama.cpp requer a transferência do modelo de tradução selecionado. Transferir agora?",
+    "microsoftTranslatorRegionHint": "Apenas para recursos regionais ou de vários serviços do Azure (por exemplo, westeurope; consulte «Chaves e ponto final» no portal do Azure). Deixe em branco para um recurso global"
   },
   "options": {
     "settings": {
