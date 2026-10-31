@@ -227,6 +227,17 @@ internal static class ContainerSubtitleLoader
         var imageList = TryLoadImageList(filePath, ext);
         if (imageList != null)
         {
+            // Image-list descriptors (BDN XML, SON, DOST, image-name SRT, ...)
+            // can contain arbitrary paths to pictures. The MCP path allow-list
+            // authorizes the descriptor, but not the files named inside it.
+            // Do not let its OCR loader open those unvalidated paths.
+            // The regular CLI does not install this MCP-only validation hook.
+            if (options.ValidateOutputPath is not null)
+            {
+                throw new InvalidOperationException(
+                    "Image-list inputs are not supported by MCP because their referenced image paths cannot be individually authorized. Use the seconv CLI in a restricted directory.");
+            }
+
             var subtitle = ImageOcrLoader.LoadImageList(imageList, filePath, options);
             if (subtitle.Paragraphs.Count == 0)
             {
