@@ -496,12 +496,73 @@ public class AutoTranslateModelAndSourceTests
         Assert.Equal(code, selected.Code);
     }
 
-    [Fact]
-    public void GenericPortugueseDetection_DoesNotInventRegionWithoutPreviousSelection()
+    [Theory]
+    [InlineData("pt-PT", "pt-PT")]
+    [InlineData("pt-BR", "pt-BR")]
+    [InlineData("fr-FR", "pt-PT")]
+    [InlineData("en-US", "pt-PT")]
+    [InlineData(null, "pt-PT")]
+    public void GenericPortugueseDetection_UsesAvailablePortuguese_NotEnglish(
+        string? uiCultureName, string expectedCode)
+    {
+        foreach (var languages in new[]
+                 {
+                     new GoogleTranslateV1().GetSupportedSourceLanguages(),
+                     new GoogleTranslateV2().GetSupportedSourceLanguages(),
+                 })
+        {
+            var selected = AutoTranslateViewModel.ResolveDetectedSourceLanguage(
+                "pt", languages, null, uiCultureName);
+
+            Assert.NotNull(selected);
+            Assert.Equal(expectedCode, selected.Code);
+        }
+    }
+
+    [Theory]
+    [InlineData("pt-PT", "pt-BR")]
+    [InlineData("pt-BR", "pt-PT")]
+    public void GenericPortugueseDetection_PreviousRegionWinsOverUiCulture(
+        string previousCode, string uiCultureName)
     {
         var languages = new GoogleTranslateV2().GetSupportedSourceLanguages();
-        var selected = AutoTranslateViewModel.ResolveDetectedSourceLanguage("pt", languages, null);
-        Assert.Null(selected);
+        var previous = languages.Single(p => p.Code == previousCode);
+
+        var selected = AutoTranslateViewModel.ResolveDetectedSourceLanguage(
+            "pt", languages, previous, uiCultureName);
+
+        Assert.NotNull(selected);
+        Assert.Equal(previousCode, selected.Code);
+    }
+
+    [Fact]
+    public void GenericPortugueseDetection_WhenOnlyBrazilIsOffered_DoesNotChooseEnglish()
+    {
+        var languages = new List<TranslationPair>
+        {
+            new("English", "en"),
+            new("Brazilian Portuguese", "pt-BR"),
+        };
+
+        var selected = AutoTranslateViewModel.ResolveDetectedSourceLanguage(
+            "pt", languages, null, "en-US");
+
+        Assert.NotNull(selected);
+        Assert.Equal("pt-BR", selected.Code);
+    }
+
+    [Fact]
+    public void GenericPortugueseDetection_OtherLanguagesAreNotReinterpreted()
+    {
+        var languages = new GoogleTranslateV2().GetSupportedSourceLanguages();
+
+        var spanish = AutoTranslateViewModel.ResolveDetectedSourceLanguage("es", languages, null, "pt-PT");
+        var english = AutoTranslateViewModel.ResolveDetectedSourceLanguage("en", languages, null, "pt-BR");
+        var unknown = AutoTranslateViewModel.ResolveDetectedSourceLanguage("xx-INVALID", languages, null, "pt-PT");
+
+        Assert.Equal("es", spanish?.Code);
+        Assert.Equal("en", english?.Code);
+        Assert.Null(unknown);
     }
 
     [Fact]
