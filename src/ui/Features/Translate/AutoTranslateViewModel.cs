@@ -2725,11 +2725,11 @@ public partial class AutoTranslateViewModel : ObservableObject
             string[] variants;
             if (script.Equals("Hans", StringComparison.OrdinalIgnoreCase))
             {
-                variants = ["zh-Hans", "zh-CN", "Chinese (Simplified)"];
+                variants = new[] { "zh-Hans", "zh-CN", "Chinese (Simplified)" };
             }
             else if (script.Equals("Hant", StringComparison.OrdinalIgnoreCase))
             {
-                variants = ["zh-Hant", "zh-TW", "Chinese (Traditional)"];
+                variants = new[] { "zh-Hant", "zh-TW", "Chinese (Traditional)" };
             }
             else
             {
