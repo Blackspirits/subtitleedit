@@ -141,11 +141,11 @@ The server exposes:
 
 | Tool | What it does |
 |---|---|
-| `list_formats` | Lists readable/writable formats. Optional substring filter. |
+| `list_formats` | Lists engine formats, including `mcpOutputSupported` for outputs allowed through the scoped MCP adapter. Optional substring filter. |
 | `subtitle_info` | Detects format, encoding, paragraph count, time range, duration and language. |
 | `read_subtitle` | Reads paged subtitle paragraphs from supported text or binary formats. |
 | `lint_subtitle` | Runs the same subtitle validation rules as `seconv lint`. |
-| `convert_subtitle` | Converts one or more local subtitle inputs using a focused subset of CLI controls (format/output, encoding, timing, track selection, OCR and cleanup operations). Advanced translation/image-style/custom-format/settings controls remain CLI-only. |
+| `convert_subtitle` | Converts local subtitle inputs with a subset of CLI controls (format/output, encoding, timing, track selection, OCR and cleanup). Multi-file image outputs and advanced translation/image-style/custom-format/settings controls remain CLI-only. |
 | `list_fix_common_errors_rules` | Lists rule ids accepted by `fixCommonErrorsRules`. |
 | `list_remove_formatting_rules` | Lists rule ids accepted by `removeFormattingRules`. |
 
@@ -166,6 +166,9 @@ An output placed next to an input also requires write access to that folder.
 **This is a path allow-list, not an operating-system filesystem sandbox.**
 Known VobSub `.sub`/`.idx` and DVD `.IFO`/`.VOB` companions are checked,
 and resolved output destinations (including collision suffixes) are validated before writes.
+Image formats that generate additional PNG/XML sidecar files or output folders are
+blocked by MCP until those secondary destinations can be individually checked.
+The regular CLI remains available for these formats.
 There is still a possible check/use race for filesystem objects that another
 process can mutate, and other format loaders may inspect additional companion files.
 Run the server with least-privilege OS permissions and use your MCP client's
