@@ -37,6 +37,13 @@ internal class Program
             return RunOptimizeNOcrCommand(args.Skip(1).ToArray());
         }
 
+        // MCP has its own CLI grammar. Conversion argument rewrites must never
+        // reinterpret the authorized directory paths or protocol options.
+        if (args.Length > 0 && args[0].TrimStart('/', '-').Equals("mcp", StringComparison.OrdinalIgnoreCase))
+        {
+            return Mcp.McpServerHost.RunAsync(args.Skip(1).ToArray()).GetAwaiter().GetResult();
+        }
+
         // Handle legacy /convert syntax and convert to modern syntax
         args = ConvertLegacyArguments(args);
 
