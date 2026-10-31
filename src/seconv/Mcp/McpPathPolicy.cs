@@ -203,7 +203,12 @@ internal sealed class McpPathPolicy
             }
             catch (FileNotFoundException)
             {
-                // An output path may not exist yet; it is still lexically scoped.
+                // A dangling symlink may appear nonexistent to File.Exists and
+                // GetAttributes. Reject it before a write follows it outside.
+                if (new FileInfo(current).LinkTarget is not null)
+                {
+                    throw new McpException("Symbolic links are not permitted inside an MCP-approved directory.");
+                }
             }
             catch (DirectoryNotFoundException)
             {
