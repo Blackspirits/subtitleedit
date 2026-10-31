@@ -258,7 +258,7 @@ internal class SubtitleConverter
                             AnsiConsole.MarkupInterpolated($"[dim]{fileIndex}:[/] [cyan]{Path.GetFileName(inputFile)}[/] [dim]->[/] [green]{outputFile}[/]...");
                         }
                         var warnings = new List<string>();
-                        await ConvertFileAsync(inputFile, outputFile, options, warnings);
+                        await ConvertFileAsync(inputFile, outputFile, options, warnings, cancellationToken);
                         result.SuccessfulFiles++;
                         ApplySourceTimestamp(sourceTimestamps, outputFile);
                         result.Files.Add(new FileConversionResult(inputFile, outputFile, true, null, warnings.Count > 0 ? warnings : null));
@@ -300,7 +300,7 @@ internal class SubtitleConverter
                             {
                                 AnsiConsole.MarkupInterpolated($"[dim]{fileIndex}:[/] [cyan]{Path.GetFileName(inputFile)}[/] [yellow]{trackLabel}[/][blue]{langLabel}[/][dim]->[/] [green]{outputFile}[/]...");
                             }
-                            await ConvertTrackAsync(track, outputFile, options);
+                            await ConvertTrackAsync(track, outputFile, options, cancellationToken);
                             result.SuccessfulFiles++;
                             ApplySourceTimestamp(sourceTimestamps, outputFile);
                             result.Files.Add(new FileConversionResult(inputFile, outputFile, true, null));
@@ -1035,7 +1035,7 @@ internal class SubtitleConverter
         return files;
     }
 
-    private async Task ConvertFileAsync(string inputFile, string outputFile, ConversionOptions options, List<string> warnings)
+    private async Task ConvertFileAsync(string inputFile, string outputFile, ConversionOptions options, List<string> warnings, CancellationToken cancellationToken)
     {
         // Frame-based formats (e.g. MicroDVD) read Configuration.Settings.General.CurrentFrameRate
         // when loading. Set it before LoadSubtitle and restore in finally so concurrent or
@@ -1050,6 +1050,7 @@ internal class SubtitleConverter
 
             await Task.Run(async () =>
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 // --encoding:source means "use the input file's detected encoding for both
                 // read and write". Resolve it per-file before the load so the same encoding
                 // name flows into the save side too.
@@ -1063,14 +1064,15 @@ internal class SubtitleConverter
                 // Load subtitle file using LibSE — keep the detected format so the
                 // save side can apply RemoveNativeFormatting when the target differs.
                 var (subtitle, sourceFormat) = LibSEIntegration.LoadSubtitleWithFormat(inputFile, resolvedOptions.Encoding, resolvedOptions.InputEncodingFallback, warnings);
+                cancellationToken.ThrowIfCancellationRequested();
 
                 if (subtitle == null || subtitle.Paragraphs.Count == 0)
                 {
                     throw new InvalidOperationException($"No subtitles found in file: {inputFile}");
                 }
 
-                await ApplyTransformsAndSaveAsync(subtitle, sourceFormat, outputFile, resolvedOptions);
-            });
+                await ApplyTransformsAndSaveAsync(subtitle, sourceFormat, outputFile, resolvedOptions, cancellationToken);
+            }, cancellationToken);
         }
         finally
         {
@@ -1078,7 +1080,7 @@ internal class SubtitleConverter
         }
     }
 
-    private async Task ConvertTrackAsync(ContainerSubtitleLoader.LoadedTrack track, string outputFile, ConversionOptions options)
+    private async Task ConvertTrackAsync(ContainerSubtitleLoader.LoadedTrack track, string outputFile, ConversionOptions options, CancellationToken cancellationToken)
     {
         var originalFrameRate = Configuration.Settings.General.CurrentFrameRate;
         try
@@ -1090,13 +1092,14 @@ internal class SubtitleConverter
 
             await Task.Run(async () =>
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (track.Subtitle.Paragraphs.Count == 0)
                 {
                     throw new InvalidOperationException("Track is empty.");
                 }
 
-                await ApplyTransformsAndSaveAsync(track.Subtitle, track.Format, outputFile, options);
-            });
+                await ApplyTransformsAndSaveAsync(track.Subtitle, track.Format, outputFile, options, cancellationToken);
+            }, cancellationToken);
         }
         finally
         {
@@ -1104,8 +1107,9 @@ internal class SubtitleConverter
         }
     }
 
-    private async Task ApplyTransformsAndSaveAsync(Subtitle subtitle, SubtitleFormat sourceFormat, string outputFile, ConversionOptions options)
+    private async Task ApplyTransformsAndSaveAsync(Subtitle subtitle, SubtitleFormat sourceFormat, string outputFile, ConversionOptions options, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         // Apply offset (must be first, before any time-based transforms)
         if (options.Offset.HasValue && options.Offset.Value != TimeSpan.Zero)
         {
@@ -1157,9 +1161,10 @@ internal class SubtitleConverter
         // batch convert order (fix-common-errors etc. run on the translated text).
         if (_translateRunner != null)
         {
-            await _translateRunner.TranslateAsync(subtitle, CancellationToken.None);
+            await _translateRunner.TranslateAsync(subtitle, cancellationToken);
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         if (options.Operations.Count > 0)
         {
             // Wire the shared spell-check / OCR-fix engine (libuilogic) to seconv's options so the
@@ -1205,6 +1210,8 @@ internal class SubtitleConverter
             BurnInRunner.ApplyEffects(subtitle, options.BurnInEffects);
         }
 
+        // Do not replace an existing output after a cancelled translation.
+        cancellationToken.ThrowIfCancellationRequested();
         LibSEIntegration.SaveSubtitle(
             subtitle,
             outputFile,
@@ -1217,6 +1224,7 @@ internal class SubtitleConverter
 
         if (!string.IsNullOrEmpty(options.BurnInVideo))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             Action<int, int>? progress = options.Quiet ? null : (done, total) => ProgressLine.Report("Burn-in seconds", done, total);
             try
             {
