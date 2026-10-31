@@ -90,6 +90,16 @@ internal sealed class McpPathPolicy
             throw new McpException("A subtitle input path is required.");
         }
 
+        // seconv's legacy CLI splits missing, relative patterns containing commas
+        // into separate inputs after this validation. Prevent a single approved
+        // string (e.g. "safe/file.srt,../private.srt") from becoming an
+        // unapproved second path. MCP callers can pass multiple inputs as an array.
+        // An existing literal comma-named file is not split by the converter.
+        if (!Path.IsPathRooted(pattern) && pattern.Contains(',') && !File.Exists(pattern.Trim()))
+        {
+            throw new McpException("Pass multiple input paths as separate inputs array elements; comma-separated relative patterns are not supported in MCP.");
+        }
+
         // The CLI expands a wildcard only in the file name, never in a parent.
         var parent = Path.GetDirectoryName(pattern);
         var name = Path.GetFileName(pattern);
