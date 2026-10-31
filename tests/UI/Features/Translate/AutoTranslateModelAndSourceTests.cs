@@ -428,6 +428,52 @@ public class AutoTranslateModelAndSourceTests
         Assert.Equal("fr", chosen.Code);
     }
 
+    [Theory]
+    [InlineData("pt-PT")]
+    [InlineData("pt-BR")]
+    public void GenericPortugueseDetection_RetainsSavedGoogleVariant(string code)
+    {
+        var languages = new GoogleTranslateV2().GetSupportedSourceLanguages();
+        var previous = languages.Single(p => p.Code == code);
+
+        var selected = AutoTranslateViewModel.ResolveDetectedSourceLanguage("pt", languages, previous);
+
+        Assert.NotNull(selected);
+        Assert.Equal(code, selected.Code);
+    }
+
+    [Theory]
+    [InlineData("zh-CN")]
+    [InlineData("zh-TW")]
+    public void GenericChineseDetection_RetainsSavedGoogleScript(string code)
+    {
+        var languages = new GoogleTranslateV1().GetSupportedSourceLanguages();
+        var previous = languages.Single(p => p.Code == code);
+
+        var selected = AutoTranslateViewModel.ResolveDetectedSourceLanguage("zh", languages, previous);
+
+        Assert.NotNull(selected);
+        Assert.Equal(code, selected.Code);
+    }
+
+    [Fact]
+    public void GenericPortugueseDetection_DoesNotInventRegionWithoutPreviousSelection()
+    {
+        var languages = new GoogleTranslateV2().GetSupportedSourceLanguages();
+        var selected = AutoTranslateViewModel.ResolveDetectedSourceLanguage("pt", languages, null);
+        Assert.Null(selected);
+    }
+
+    [Fact]
+    public void GenericPortugueseDetection_KeepsNllbLanguageOnlyChoice()
+    {
+        var languages = new NoLanguageLeftBehindServe().GetSupportedSourceLanguages();
+        var previous = languages.Single(p => p.Code == "por_Latn");
+        var selected = AutoTranslateViewModel.ResolveDetectedSourceLanguage("pt", languages, previous);
+        Assert.NotNull(selected);
+        Assert.Equal("por_Latn", selected.Code);
+    }
+
     [Fact]
     public void DetectableSource_IsStillDetected()
     {
