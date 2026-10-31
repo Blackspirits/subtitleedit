@@ -95,6 +95,12 @@ internal sealed class McpPathPolicy
             throw new McpException("A subtitle input path is required.");
         }
 
+        // GetInputFiles trims each input before determining whether it is rooted.
+        // Validate that exact same path: a leading space before "/private/file"
+        // otherwise disguises an absolute path as a harmless relative one here,
+        // but becomes an out-of-scope absolute path when the converter reads it.
+        pattern = pattern.Trim();
+
         // seconv's legacy CLI splits missing, relative patterns containing commas
         // into separate inputs after this validation. Prevent a single approved
         // string (e.g. "safe/file.srt,../private.srt") from becoming an
@@ -134,7 +140,7 @@ internal sealed class McpPathPolicy
 
     internal void RequireConversionPaths(IEnumerable<string> patterns, string? outputFolder, string? outputFilename)
     {
-        var sources = patterns.Where(p => !string.IsNullOrWhiteSpace(p)).ToArray();
+        var sources = patterns.Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => p.Trim()).ToArray();
         foreach (var pattern in sources)
         {
             RequireReadPattern(pattern);
