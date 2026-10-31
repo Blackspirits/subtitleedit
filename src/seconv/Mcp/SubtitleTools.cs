@@ -52,7 +52,6 @@ internal sealed class SubtitleTools
             ExportHandlerBluRaySup or
             ExportHandlerDvdSup or
             ExportHandlerVobSub or
-            ExportHandlerImscImage or
             ExportHandlerDCinemaSmpte2014Mxf);
     }
 
