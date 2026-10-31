@@ -352,6 +352,22 @@ public class McpToolsTest : IDisposable
         Assert.False(SubtitleTools.IsUnsupportedMultiFileImageTarget(format));
     }
 
+    [Theory]
+    [InlineData("movie.txt")]
+    [InlineData("movie.idx")]
+    [InlineData("movie")]
+    public async Task ConvertSubtitle_VobSubRequiresSubExtension(string filename)
+    {
+        var message = ErrorText(await SubtitleTools.ConvertSubtitle(
+            inputs: [Fixtures.Path("test.srt")],
+            format: "VobSub",
+            outputFolder: _tempDir,
+            outputFilename: filename));
+
+        Assert.Contains("must end with .sub", message);
+        Assert.Empty(Directory.GetFiles(_tempDir));
+    }
+
     [Fact]
     public async Task ConvertSubtitle_MultiFileImageTarget_IsRejectedBeforeWriting()
     {
