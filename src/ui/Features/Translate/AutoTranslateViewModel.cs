@@ -2685,7 +2685,8 @@ public partial class AutoTranslateViewModel : ObservableObject
     /// </summary>
     // Saved settings refer to the provider that last wrote them. In particular the old
     // two-letter "pt" was European Portuguese in Gemini/ChatGPT, but Brazilian Portuguese
-    // in Google V1. Use provider metadata only when it is known, never infer a missing script.
+    // in Google V1 and V2. Both Google entries now store "pt-BR" explicitly; migrate legacy
+    // "pt" only when its previous provider is known. Never infer a missing script.
     internal static string? NormalizeSavedLanguageCode(string? code, string? savedProviderName)
     {
         if (!string.Equals(code, "pt", StringComparison.OrdinalIgnoreCase))
