@@ -1535,8 +1535,7 @@ public partial class AutoTranslateViewModel : ObservableObject
             return false;
         }
 
-        Se.Settings.AutoTranslate.AutoTranslateLastSource = sourceLanguage.TwoLetterIsoLanguageName;
-        Se.Settings.AutoTranslate.AutoTranslateLastTarget = targetLanguage.TwoLetterIsoLanguageName;
+        RememberLanguageCodes(sourceLanguage, targetLanguage);
 
         // do translation in background
 #pragma warning disable CS4014
@@ -1546,6 +1545,15 @@ public partial class AutoTranslateViewModel : ObservableObject
         });
 #pragma warning restore CS4014
         return true;
+    }
+
+    // The identifier stored in the user settings must describe the actual provider selection.
+    // Two-letter ISO metadata is only for display/output naming; it loses NLLB script variants
+    // (zho_Hans / zho_Hant both become "zh") and can be empty for some languages.
+    internal static void RememberLanguageCodes(TranslationPair sourceLanguage, TranslationPair targetLanguage)
+    {
+        Se.Settings.AutoTranslate.AutoTranslateLastSource = sourceLanguage.Code;
+        Se.Settings.AutoTranslate.AutoTranslateLastTarget = targetLanguage.Code;
     }
 
     private async Task DoTranslate(TranslationPair sourceLanguage, TranslationPair targetLanguage, IAutoTranslator translator, CancellationToken cancellationToken)
