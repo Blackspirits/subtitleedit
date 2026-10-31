@@ -67,10 +67,21 @@ internal sealed class McpPathPolicy
             throw new McpException("Wildcards are only permitted in the input file name.");
         }
 
-        RequireRead(string.IsNullOrEmpty(parent) ? Directory.GetCurrentDirectory() : parent);
+        var directory = string.IsNullOrEmpty(parent) ? Directory.GetCurrentDirectory() : parent;
+        RequireRead(directory);
         if (name.IndexOfAny(['*', '?']) < 0)
         {
             RequireRead(pattern);
+        }
+        else if (Directory.Exists(directory))
+        {
+            // A safe directory containing a wildcard can still contain symlinked
+            // subtitle files pointing outside the scope. Validate the resolved
+            // matches, not just their parent directory.
+            foreach (var match in Directory.EnumerateFiles(directory, name, SearchOption.TopDirectoryOnly))
+            {
+                RequireRead(match);
+            }
         }
     }
 
