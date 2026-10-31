@@ -196,6 +196,41 @@ public class McpToolsTest : IDisposable
     }
 
     [Fact]
+    public void PathPolicy_RejectsUnauthorizedDvdSidecars()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return; // Symlink creation may require special permissions.
+        }
+
+        var root = Path.Combine(_tempDir, "allowed-dvd");
+        var outside = Path.Combine(_tempDir, "outside-dvd");
+        Directory.CreateDirectory(root);
+        Directory.CreateDirectory(outside);
+        var vob = Path.Combine(root, "VTS_01_1.VOB");
+        var ifo = Path.Combine(root, "VTS_01_0.IFO");
+        var privateIfo = Path.Combine(outside, "private.IFO");
+        var privateVob = Path.Combine(outside, "private.VOB");
+        File.WriteAllText(vob, "local VOB");
+        File.WriteAllText(privateIfo, "private IFO");
+        File.WriteAllText(privateVob, "private VOB");
+        File.CreateSymbolicLink(ifo, privateIfo);
+
+        var policy = new McpPathPolicy([root], [root]);
+        policy.RequireRead(vob);
+        Assert.Throws<ModelContextProtocol.McpException>(() =>
+            policy.RequireReadWithCompanions(vob));
+
+        File.Delete(ifo);
+        File.WriteAllText(ifo, "local IFO");
+        File.Delete(vob);
+        File.CreateSymbolicLink(vob, privateVob);
+        policy.RequireRead(ifo);
+        Assert.Throws<ModelContextProtocol.McpException>(() =>
+            policy.RequireReadWithCompanions(ifo));
+    }
+
+    [Fact]
     public void ListFormats_FilterMatchesIdNameAndExtension()
     {
         var all = Payload(SubtitleTools.ListFormats());
