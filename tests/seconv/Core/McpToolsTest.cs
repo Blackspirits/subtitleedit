@@ -310,6 +310,33 @@ public class McpToolsTest : IDisposable
     }
 
     [Fact]
+    public void VobSubOutputFallback_ReservesSubAndIdxAsAPair()
+    {
+        var input = Path.Combine(_tempDir, "movie.srt");
+        File.WriteAllText(input, "1\n00:00:01,000 --> 00:00:02,000\nHello.\n");
+        File.WriteAllText(Path.Combine(_tempDir, "movie.idx"), "occupied index");
+        var checkedPaths = new List<string>();
+        var options = new SeConv.Core.ConversionOptions
+        {
+            Patterns = [input],
+            Format = "VobSub",
+            OutputFolder = _tempDir,
+            Overwrite = false,
+            ValidateOutputPath = checkedPaths.Add,
+        };
+
+        var first = SeConv.Core.SubtitleConverter.ResolveOutputFileName(input, options);
+        Assert.Equal(Path.Combine(_tempDir, "movie_2.sub"), first);
+        Assert.Equal([first, Path.ChangeExtension(first, ".idx")], checkedPaths);
+
+        File.WriteAllText(Path.Combine(_tempDir, "movie_2.idx"), "occupied index");
+        checkedPaths.Clear();
+        var second = SeConv.Core.SubtitleConverter.ResolveOutputFileName(input, options);
+        Assert.Equal(Path.Combine(_tempDir, "movie_3.sub"), second);
+        Assert.Equal([second, Path.ChangeExtension(second, ".idx")], checkedPaths);
+    }
+
+    [Fact]
     public void VobSubStreamOutputPreflight_BlocksExistingIndexedPairs()
     {
         var first = Path.Combine(_tempDir, "movie.0.sub");
