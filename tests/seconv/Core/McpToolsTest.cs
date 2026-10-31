@@ -77,9 +77,12 @@ public class McpToolsTest : IDisposable
         var policy = new McpPathPolicy([root], []);
 
         policy.RequireRead(Path.Combine(root, "movie.srt"));
-        policy.RequireRead(Path.Combine(root, "nested", "..", "movie.srt"));
+        Assert.Throws<ModelContextProtocol.McpException>(() =>
+            policy.RequireRead(Path.Combine(root, "nested", "..", "movie.srt")));
         Assert.Throws<ModelContextProtocol.McpException>(() =>
             policy.RequireRead(Path.Combine(root, "..", "outside.srt")));
+        Assert.Throws<ModelContextProtocol.McpException>(() =>
+            policy.RequireReadPattern(Path.Combine(root, "nested", "..", "*.srt")));
         Assert.Throws<ModelContextProtocol.McpException>(() =>
             policy.RequireRead(root + "-other/movie.srt"));
         Assert.Throws<ModelContextProtocol.McpException>(() =>
@@ -126,6 +129,11 @@ public class McpToolsTest : IDisposable
             policy.RequireRead(fileLink));
         Assert.Throws<ModelContextProtocol.McpException>(() =>
             policy.RequireReadPattern(Path.Combine(root, "*.srt")));
+        Assert.Throws<ModelContextProtocol.McpException>(() =>
+            policy.RequireRead(Path.Combine(link, "..", "private.srt")));
+        Assert.Throws<ModelContextProtocol.McpException>(() =>
+            policy.RequireConversionPaths(
+                [Path.Combine(root, "link", "..", "*.srt")], root, null));
     }
 
     [Fact]
