@@ -334,6 +334,50 @@ public class AutoTranslateModelAndSourceTests
         Assert.Equal(expected, next.Name);
     }
 
+    [Theory]
+    [InlineData("arb_Latn")] // Romanized Arabic is not the Arabic-script Google option.
+    [InlineData("ace_Arab")] // Acehnese has distinct NLLB Arabic/Latin options.
+    [InlineData("bjn_Arab")]
+    [InlineData("min_Arab")]
+    [InlineData("kas_Deva")]
+    [InlineData("taq_Tfng")]
+    [InlineData("eng_Cyrl")] // Not a supported NLLB code: do not invent an English variant.
+    public void UnrepresentedScript_IsNotSilentlyMappedToGenericProvider(string previousCode)
+    {
+        var targets = new GoogleTranslateV1().GetSupportedTargetLanguages();
+        Assert.Null(AutoTranslateViewModel.FindLanguage(targets, previousCode));
+    }
+
+    [Fact]
+    public void NativeScriptArabic_CanStillMapToGenericArabic()
+    {
+        var targets = new GoogleTranslateV1().GetSupportedTargetLanguages();
+        var match = AutoTranslateViewModel.FindLanguage(targets, "arb_Arab");
+        Assert.NotNull(match);
+        Assert.Equal("ar", match.Code);
+    }
+
+    [Fact]
+    public void SwitchProvider_DoesNotTurnRomanizedArabicIntoArabicScript()
+    {
+        var nllb = new NoLanguageLeftBehindServe();
+        var previous = nllb.GetSupportedTargetLanguages().Single(p => p.Code == "arb_Latn");
+        var google = new GoogleTranslateV1();
+        Assert.Null(AutoTranslateViewModel.FindSameLanguage(previous, google.GetSupportedTargetLanguages()));
+    }
+
+    [Fact]
+    public void UnsupportedScript_UsesSafeCultureFallbackRatherThanWrongTarget()
+    {
+        var google = new GoogleTranslateV1();
+        var targets = google.GetSupportedTargetLanguages();
+        var english = targets.Single(p => p.Code == "en");
+        var chosen = AutoTranslateViewModel.FindDefaultTargetLanguage(
+            targets, english, lastTarget: "arb_Latn", uiCultureName: "fr-FR");
+        Assert.NotNull(chosen);
+        Assert.Equal("fr", chosen.Code);
+    }
+
     [Fact]
     public void DetectableSource_IsStillDetected()
     {
