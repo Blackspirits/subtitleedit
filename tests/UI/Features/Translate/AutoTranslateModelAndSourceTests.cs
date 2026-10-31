@@ -306,7 +306,7 @@ public class AutoTranslateModelAndSourceTests
             targets, english, lastTarget: "pt", uiCultureName: "en-US",
             savedProviderName: GoogleTranslateV1.StaticName);
         Assert.NotNull(selected);
-        Assert.Equal("pt", selected.Code);
+        Assert.Equal("pt-BR", selected.Code);
     }
 
     [Fact]
@@ -323,6 +323,43 @@ public class AutoTranslateModelAndSourceTests
     }
 
     [Fact]
+    public void LegacyGoogleV2BrazilianIso_MapsBackToCanonicalGoogleV2()
+    {
+        var google = new GoogleTranslateV2();
+        var targets = google.GetSupportedTargetLanguages();
+        var english = targets.Single(p => p.Code == "en");
+        var selected = AutoTranslateViewModel.FindDefaultTargetLanguage(
+            targets, english, lastTarget: "pt", uiCultureName: "en-US",
+            savedProviderName: GoogleTranslateV2.StaticName);
+        Assert.NotNull(selected);
+        Assert.Equal("pt-BR", selected.Code);
+    }
+
+    [Theory]
+    [InlineData("pt-PT", "Portuguese")]
+    [InlineData("pt-BR", "Brazilian Portuguese")]
+    public void GoogleV2Variants_SurviveEngineSwitchToGemini(string code, string expected)
+    {
+        var previous = new GoogleTranslateV2().GetSupportedTargetLanguages().Single(p => p.Code == code);
+        var selected = AutoTranslateViewModel.FindSameLanguage(
+            previous, new GeminiTranslate().GetSupportedTargetLanguages());
+        Assert.NotNull(selected);
+        Assert.Equal(expected, selected.Name);
+    }
+
+    [Theory]
+    [InlineData("pt-PT")]
+    [InlineData("pt-BR")]
+    public void GoogleV1AndV2_PreservePortugueseCodesBetweenEngines(string code)
+    {
+        var previous = new GoogleTranslateV1().GetSupportedTargetLanguages().Single(p => p.Code == code);
+        var next = AutoTranslateViewModel.FindSameLanguage(
+            previous, new GoogleTranslateV2().GetSupportedTargetLanguages());
+        Assert.NotNull(next);
+        Assert.Equal(code, next.Code);
+    }
+
+    [Fact]
     public void SwitchTranslator_NllbChineseTraditional_StaysTraditional()
     {
         var nllb = new NoLanguageLeftBehindServe();
@@ -334,7 +371,7 @@ public class AutoTranslateModelAndSourceTests
     }
 
     [Theory]
-    [InlineData("pt", "PORTUGUESE (BRAZIL)", "Brazilian Portuguese")]
+    [InlineData("pt-BR", "PORTUGUESE (BRAZIL)", "Brazilian Portuguese")]
     [InlineData("pt-PT", "PORTUGUESE", "Portuguese")]
     public void SwitchTranslator_GooglePortugueseVariants_DoNotCross(string code, string name, string expected)
     {
