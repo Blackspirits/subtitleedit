@@ -231,6 +231,51 @@ public class McpToolsTest : IDisposable
     }
 
     [Fact]
+    public void PathPolicy_RejectsResolvedOutputSymlinksAndFallbackNames()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return; // Symlink creation may require developer mode or elevation.
+        }
+
+        var read = Path.Combine(_tempDir, "input-scope");
+        var write = Path.Combine(_tempDir, "output-scope");
+        var outside = Path.Combine(_tempDir, "outside-scope");
+        Directory.CreateDirectory(read);
+        Directory.CreateDirectory(write);
+        Directory.CreateDirectory(outside);
+        var input = Path.Combine(read, "movie.srt");
+        File.WriteAllText(input, "1\\n00:00:01,000 --> 00:00:02,000\\nHello.\\n");
+        var output = Path.Combine(write, "movie.vtt");
+        var privateOutput = Path.Combine(outside, "private.vtt");
+        File.WriteAllText(privateOutput, "private data");
+        File.CreateSymbolicLink(output, privateOutput);
+
+        var policy = new McpPathPolicy([read], [write]);
+        var options = new SeConv.Core.ConversionOptions
+        {
+            Patterns = [input],
+            Format = "webvtt",
+            OutputFolder = write,
+            Overwrite = true,
+            ValidateOutputPath = policy.RequireWrite,
+        };
+        Assert.Throws<ModelContextProtocol.McpException>(() =>
+            SeConv.Core.SubtitleConverter.ResolveOutputFileName(input, options));
+
+        // With overwrite disabled the converter picks movie_2.vtt; that fallback
+        // must also be checked, including a dangling link (File.Exists = false).
+        File.Delete(output);
+        File.WriteAllText(output, "existing output");
+        var fallback = Path.Combine(write, "movie_2.vtt");
+        File.CreateSymbolicLink(fallback, Path.Combine(outside, "missing.vtt"));
+        Assert.False(File.Exists(fallback));
+        Assert.Throws<ModelContextProtocol.McpException>(() =>
+            SeConv.Core.SubtitleConverter.ResolveOutputFileName(
+                input, options with { Overwrite = false }));
+    }
+
+    [Fact]
     public void ListFormats_FilterMatchesIdNameAndExtension()
     {
         var all = Payload(SubtitleTools.ListFormats());
