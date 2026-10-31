@@ -2566,8 +2566,12 @@ public partial class AutoTranslateViewModel : ObservableObject
             {
                 // If the detector only established generic Chinese, retain the last known
                 // Chinese script rather than overwriting it with an ambiguous "zh".
-                if (detected.Equals("zh", StringComparison.OrdinalIgnoreCase) &&
-                    previousLanguage != null && previousLanguage.TwoLetterIsoLanguageName == "zh")
+                if (previousLanguage != null &&
+                    ((detected.Equals("zh", StringComparison.OrdinalIgnoreCase) &&
+                      previousLanguage.TwoLetterIsoLanguageName.Equals("zh", StringComparison.OrdinalIgnoreCase)) ||
+                     (detected.Equals("pt", StringComparison.OrdinalIgnoreCase) &&
+                      (previousLanguage.TwoLetterIsoLanguageName.Equals("pt", StringComparison.OrdinalIgnoreCase) ||
+                       previousLanguage.TwoLetterIsoLanguageName.StartsWith("pt-", StringComparison.OrdinalIgnoreCase)))))
                 {
                     return previousLanguage.Code;
                 }
