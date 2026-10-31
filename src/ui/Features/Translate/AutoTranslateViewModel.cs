@@ -679,40 +679,19 @@ public partial class AutoTranslateViewModel : ObservableObject
             SourceLanguages.Add(language);
         }
 
-        SelectedSourceLanguage = null;
-        var sourceLanguageIsoCode = EvaluateDefaultSourceLanguageCode(_subtitle.OriginalEncoding, _subtitle, sourceLanguages);
-        if (!string.IsNullOrEmpty(sourceLanguageIsoCode))
+        var sourceLanguageCode = EvaluateDefaultSourceLanguageCode(_subtitle.OriginalEncoding, _subtitle, sourceLanguages);
+        SelectedSourceLanguage = FindLanguage(SourceLanguages, sourceLanguageCode);
+
+        if (SelectedSourceLanguage == null)
         {
-            var lang = SourceLanguages.FirstOrDefault(p => p.Code == sourceLanguageIsoCode);
-            if (lang != null)
-            {
-                SelectedSourceLanguage = lang;
-            }
+            var last = NormalizeSavedLanguageCode(Se.Settings.AutoTranslate.AutoTranslateLastSource,
+                Se.Settings.AutoTranslate.AutoTranslateLastName);
+            SelectedSourceLanguage = FindLanguage(SourceLanguages, last);
         }
 
-        var languageName = Iso639Dash2LanguageCode.List.FirstOrDefault(l => l.TwoLetterCode.Equals(sourceLanguageIsoCode, StringComparison.InvariantCultureIgnoreCase))?.EnglishName;
-        if (SelectedSourceLanguage == null && !string.IsNullOrEmpty(languageName))
-        {
-            var lang = SourceLanguages.FirstOrDefault(p => p.Name == languageName);
-            if (lang != null)
-            {
-                SelectedSourceLanguage = lang;
-            }
-        }
-
-        if (SelectedSourceLanguage == null && !string.IsNullOrEmpty(Se.Settings.AutoTranslate.AutoTranslateLastSource))
-        {
-            var lang = SourceLanguages.FirstOrDefault(p => p.Code == Se.Settings.AutoTranslate.AutoTranslateLastSource);
-            if (lang != null)
-            {
-                SelectedSourceLanguage = lang;
-            }
-        }
-
-        if (SelectedSourceLanguage == null && SourceLanguages.Count > 0)
-        {
-            SelectedSourceLanguage = SourceLanguages[0];
-        }
+        // Never silently pick an arbitrary first item (e.g. Abkhaz for Chinese).
+        SelectedSourceLanguage ??= FindLanguage(SourceLanguages, "en");
+        SelectedSourceLanguage ??= SourceLanguages.FirstOrDefault();
     }
 
     private void UpdateTargetLanguages(IAutoTranslator autoTranslator)
@@ -734,7 +713,8 @@ public partial class AutoTranslateViewModel : ObservableObject
             Se.Settings.AutoTranslate.AutoTranslateLastTarget,
             Se.Language.CultureName,
             Se.Settings.AutoTranslate.AutoTranslateLastSource,
-            System.Globalization.CultureInfo.CurrentUICulture.Name);
+            System.Globalization.CultureInfo.CurrentUICulture.Name,
+            Se.Settings.AutoTranslate.AutoTranslateLastName);
     }
 
     [RelayCommand]
@@ -2567,37 +2547,47 @@ public partial class AutoTranslateViewModel : ObservableObject
 
     public static string EvaluateDefaultSourceLanguageCode(Encoding? encoding, Subtitle subtitle, ObservableCollection<TranslationPair> sourceLanguages)
     {
-        var defaultSourceLanguageCode = string.Empty;
-        if (encoding != null)
+        var detected = encoding == null ? string.Empty : LanguageAutoDetect.AutoDetectGoogleLanguage(encoding);
+        if (string.IsNullOrEmpty(detected))
         {
-            defaultSourceLanguageCode = LanguageAutoDetect.AutoDetectGoogleLanguage(encoding); // Guess language via encoding
+            // Preserve a Chinese writing system when it can be reliably identified.
+            detected = LanguageAutoDetect.AutoDetectGoogleLanguageOrNull(subtitle, detectChineseScript: true) ?? string.Empty;
         }
 
-        if (string.IsNullOrEmpty(defaultSourceLanguageCode))
+        var previous = NormalizeSavedLanguageCode(Se.Settings.AutoTranslate.AutoTranslateLastSource,
+            Se.Settings.AutoTranslate.AutoTranslateLastName);
+        var previousLanguage = FindLanguage(sourceLanguages, previous);
+
+        if (!string.IsNullOrEmpty(detected))
         {
-            defaultSourceLanguageCode = LanguageAutoDetect.AutoDetectGoogleLanguageOrNull(subtitle); // Guess language based on subtitle contents
+            // A short ISO identifier is not necessarily a valid code for the current engine.
+            var match = FindLanguage(sourceLanguages, detected);
+            if (match != null)
+            {
+                // If the detector only established generic Chinese, retain the last known
+                // Chinese script rather than overwriting it with an ambiguous "zh".
+                if (detected.Equals("zh", StringComparison.OrdinalIgnoreCase) &&
+                    previousLanguage != null && previousLanguage.TwoLetterIsoLanguageName == "zh")
+                {
+                    return previousLanguage.Code;
+                }
+                return match.Code;
+            }
+
+            // If detection found a language but not a reliable script/provider variant, prefer
+            // a compatible saved choice over the alphabetically first list entry.
+            if (previousLanguage != null && detected.Equals(previousLanguage.TwoLetterIsoLanguageName, StringComparison.OrdinalIgnoreCase))
+            {
+                return previousLanguage.Code;
+            }
+        }
+        else if (previousLanguage != null)
+        {
+            return previousLanguage.Code;
         }
 
-        // Nothing recognizable - typically a line or two picked for "Selected lines > Auto translate".
-        // Assuming English then pushed an English target off the target combo, which skips the source
-        // language, so it opened on German instead (#14926). The last source is a better guess.
-        if (string.IsNullOrEmpty(defaultSourceLanguageCode))
-        {
-            // The saved source belongs to the previously used engine. Its identifier may use a
-            // different convention (for example NLLB "eng_Latn" versus Google "en" or an LLM
-            // engine's "English"), so resolve it against the *current* engine before returning it.
-            var lastSource = Se.Settings.AutoTranslate.AutoTranslateLastSource;
-            return FindLanguage(sourceLanguages, lastSource)?.Code ?? "en";
-        }
-
-        if (!string.IsNullOrEmpty(Se.Settings.AutoTranslate.AutoTranslateLastSource) &&
-            Se.Settings.AutoTranslate.AutoTranslateLastSource.StartsWith(defaultSourceLanguageCode) &&
-            sourceLanguages.Any(p => p.Code == Se.Settings.AutoTranslate.AutoTranslateLastSource))
-        {
-            return Se.Settings.AutoTranslate.AutoTranslateLastSource;
-        }
-
-        return defaultSourceLanguageCode;
+        // Unknown/ambiguous detection: English is safer than selecting Abkhaz/Acehnese by index.
+        return FindLanguage(sourceLanguages, "en")?.Code ?? string.Empty;
     }
 
     /// <summary>
@@ -2618,18 +2608,19 @@ public partial class AutoTranslateViewModel : ObservableObject
         string? lastTarget,
         string? uiCultureName,
         string? lastSource = null,
-        string? osCultureName = null)
+        string? osCultureName = null,
+        string? savedProviderName = null)
     {
         if (targetLanguages.Count == 0)
         {
             return null;
         }
 
-        var candidates = new List<string?> { lastTarget };
-        var lastTargetLanguage = FindLanguage(targetLanguages, lastTarget);
+        var candidates = new List<string?> { NormalizeSavedLanguageCode(lastTarget, savedProviderName) };
+        var lastTargetLanguage = FindLanguage(targetLanguages, candidates[0]);
         if (lastTargetLanguage != null && IsSameLanguage(lastTargetLanguage, sourceLanguage))
         {
-            candidates.Add(lastSource);
+            candidates.Add(NormalizeSavedLanguageCode(lastSource, savedProviderName));
         }
 
         AddCultureCandidates(candidates, uiCultureName);
