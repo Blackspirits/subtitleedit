@@ -245,6 +245,18 @@ public class McpToolsTest : IDisposable
         policy.RequireRead(ifo);
         Assert.Throws<ModelContextProtocol.McpException>(() =>
             policy.RequireReadWithCompanions(ifo));
+
+        // A .BUP may cause the DVD extractor to read its .IFO sibling.
+        // Verify the .IFO link is rejected even when the VOB is safe.
+        File.Delete(vob);
+        File.WriteAllText(vob, "local VOB");
+        File.Delete(ifo);
+        File.CreateSymbolicLink(ifo, privateIfo);
+        var bup = Path.Combine(root, "VTS_01_0.BUP");
+        File.WriteAllText(bup, "local BUP");
+        policy.RequireRead(bup);
+        Assert.Throws<ModelContextProtocol.McpException>(() =>
+            policy.RequireReadWithCompanions(bup));
     }
 
     [Fact]
