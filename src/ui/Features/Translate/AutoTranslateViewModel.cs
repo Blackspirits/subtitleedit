@@ -1921,17 +1921,19 @@ public partial class AutoTranslateViewModel : ObservableObject
     /// codes - so matching on the code alone would drop the selection between exactly the
     /// engines a user is most likely to be comparing.
     /// </summary>
-    private static TranslationPair? FindSameLanguage(TranslationPair? previous, ObservableCollection<TranslationPair> languages)
+    // While changing providers in the same dialog, keep the user's exact chosen script/
+    // regional variant. Provider language names are more descriptive than lossy short ISO
+    // codes (Google V1 "pt" means Brazilian Portuguese, but Gemini "pt" means European).
+    internal static TranslationPair? FindSameLanguage(TranslationPair? previous, IList<TranslationPair> languages)
     {
         if (previous == null)
         {
             return null;
         }
 
-        return languages.FirstOrDefault(p => !string.IsNullOrEmpty(p.Code) && p.Code.Equals(previous.Code, StringComparison.OrdinalIgnoreCase))
-               ?? languages.FirstOrDefault(p => !string.IsNullOrEmpty(p.Name) && p.Name.Equals(previous.Name, StringComparison.OrdinalIgnoreCase))
-               ?? languages.FirstOrDefault(p => !string.IsNullOrEmpty(p.TwoLetterIsoLanguageName)
-                                                && p.TwoLetterIsoLanguageName.Equals(previous.TwoLetterIsoLanguageName, StringComparison.OrdinalIgnoreCase));
+        return FindLanguage(languages, previous.Name)
+               ?? FindLanguage(languages, previous.Code)
+               ?? FindLanguage(languages, previous.TwoLetterIsoLanguageName);
     }
 
     partial void OnSelectedTargetLanguageChanged(TranslationPair? value)
