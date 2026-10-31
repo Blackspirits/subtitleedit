@@ -68,7 +68,12 @@ internal sealed class McpPathPolicy
                 break;
             case ".ifo":
             case ".bup":
-                foreach (var vob in IfoParser.GetTitleVobFiles(Path.ChangeExtension(path, ".IFO")))
+                // A DVD backup IFO can lead the VOB extractor back to the
+                // title set's .IFO file. Authorize that file explicitly too.
+                // Otherwise an .IFO symlink could be followed indirectly.
+                var titleIfo = Path.ChangeExtension(path, ".IFO");
+                RequireRead(titleIfo);
+                foreach (var vob in IfoParser.GetTitleVobFiles(titleIfo))
                 {
                     RequireRead(vob);
                 }
