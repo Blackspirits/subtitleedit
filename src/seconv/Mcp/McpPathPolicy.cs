@@ -1,3 +1,4 @@
+using Nikse.SubtitleEdit.Core.VobSub;
 using ModelContextProtocol;
 
 namespace SeConv.Mcp;
@@ -51,6 +52,37 @@ internal sealed class McpPathPolicy
     internal void RequireRead(string path) => RequirePath(path, _readRoots);
     internal void RequireWrite(string path) => RequirePath(path, _writeRoots);
 
+    // Some subtitle formats implicitly open companion files. Authorize those
+    // paths too, before any decoder runs; checking the requested input alone
+    // can otherwise allow a symlinked companion to escape the read scope.
+    internal void RequireReadWithCompanions(string path)
+    {
+        RequireRead(path);
+        switch (Path.GetExtension(path).ToLowerInvariant())
+        {
+            case ".sub":
+                RequireRead(Path.ChangeExtension(path, ".idx"));
+                break;
+            case ".idx":
+                RequireRead(Path.ChangeExtension(path, ".sub"));
+                break;
+            case ".ifo":
+            case ".bup":
+                foreach (var vob in IfoParser.GetTitleVobFiles(Path.ChangeExtension(path, ".IFO")))
+                {
+                    RequireRead(vob);
+                }
+                break;
+            case ".vob":
+                var ifo = IfoParser.GetIfoFileName(path);
+                if (ifo is not null)
+                {
+                    RequireRead(ifo);
+                }
+                break;
+        }
+    }
+
     internal void RequireReadPattern(string pattern)
     {
         if (string.IsNullOrWhiteSpace(pattern))
@@ -71,7 +103,7 @@ internal sealed class McpPathPolicy
         RequireRead(directory);
         if (name.IndexOfAny(['*', '?']) < 0)
         {
-            RequireRead(pattern);
+            RequireReadWithCompanions(pattern);
         }
         else if (Directory.Exists(directory))
         {
@@ -80,7 +112,7 @@ internal sealed class McpPathPolicy
             // matches, not just their parent directory.
             foreach (var match in Directory.EnumerateFiles(directory, name, SearchOption.TopDirectoryOnly))
             {
-                RequireRead(match);
+                RequireReadWithCompanions(match);
             }
         }
     }
