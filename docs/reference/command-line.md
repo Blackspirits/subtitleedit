@@ -86,7 +86,7 @@ seconv dump-settings        # print a full --settings JSON with libse defaults (
 seconv info <file>          # print format/encoding/duration/language for a file
 seconv lint <pattern>       # validate subtitle(s); exit 1 if issues found
 seconv optimize-nocr <db>   # remove nOCR lines that don't tell characters apart (in place + .bak, or --output:<path>)
-seconv mcp                  # run as a Model Context Protocol server over stdio
+seconv mcp --read-dir /subs --write-dir /output  # MCP stdio, explicit path permissions
 seconv --help               # show help (same text as -h, /? and /help)
 seconv --help-json          # print the whole command-line schema as JSON
 seconv --version            # print version and exit
@@ -134,7 +134,7 @@ seconv lint *.srt --json             # CI-friendly: exit 1 on any issue
 Register it as a local stdio server in an MCP-capable client:
 
 ```json
-{ "mcpServers": { "seconv": { "command": "seconv", "args": ["mcp"] } } }
+{ "mcpServers": { "seconv": { "command": "seconv", "args": ["mcp", "--read-dir", "/home/user/subtitles", "--write-dir", "/home/user/subtitles/output"] } } }
 ```
 
 The server exposes:
@@ -154,12 +154,26 @@ advertised as write-capable and destructive-capable because `overwrite=true` may
 All tools are closed-world local-file operations. Client cancellation is propagated cooperatively into conversion;
 legacy synchronous/native stages that do not accept a cancellation token are stopped at the surrounding checkpoints.
 
-The MCP server does not add a filesystem sandbox. Paths are resolved as local paths under the operating-system permissions of the `seconv` process; clients should apply their normal tool-approval and sandbox policies.
+The MCP server **denies filesystem access by default**. Specify at least one existing
+`--read-dir <directory>` to start the server. Add `--write-dir <directory>` only for
+folders where converted files may be created or replaced; without it,
+`convert_subtitle` cannot write outputs. Both flags may be repeated. Source
+paths and input globs must remain inside readable directories, and the actual
+output directory/filename must remain inside writable directories. Parent
+traversal and symbolic-link escapes below approved roots are rejected.
+An output placed next to an input also requires write access to that folder.
+
+**This is a path allow-list, not an operating-system filesystem sandbox.**
+There is still a possible check/use race for filesystem objects that another
+process can mutate, and some format loaders may inspect companion files.
+Run the server with least-privilege OS permissions and use your MCP client's
+tool-approval and sandbox policies. Do not approve sensitive home directories
+or entire drives unless access is genuinely intended.
 
 A failed or cancelled multi-file call can have completed earlier output files before the later failure or cancellation. Inspect the returned per-file conversion data and existing outputs before retrying; a tool error is not a transaction rollback.
 
 Stdout is reserved exclusively for MCP JSON-RPC traffic. Logs and diagnostics go to stderr; start the server with
-`seconv mcp --verbose` for debug logging.
+`seconv mcp --read-dir /subs --verbose` for debug logging.
 
 ## Options
 

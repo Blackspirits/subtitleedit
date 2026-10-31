@@ -68,15 +68,18 @@ Run `seconv mcp` to expose local subtitle inspection and conversion over
 [Model Context Protocol](https://modelcontextprotocol.io) stdio:
 
 ```json
-{ "mcpServers": { "seconv": { "command": "seconv", "args": ["mcp"] } } }
+{ "mcpServers": { "seconv": { "command": "seconv", "args": ["mcp", "--read-dir", "/home/user/subtitles", "--write-dir", "/home/user/subtitles/output"] } } }
 ```
 
 The server provides `list_formats`, `subtitle_info`, `read_subtitle`,
 `lint_subtitle`, `convert_subtitle`, `list_fix_common_errors_rules`,
 and `list_remove_formatting_rules`. The conversion tool can modify files.
-There is **no built-in filesystem sandbox**: it runs under the local user's
-filesystem permissions, and `overwrite=true` can replace existing output.
-Use client-side tool approval and sandboxing. Partial output files may persist
+The MCP server **requires an explicit `--read-dir`** and allows writes only
+under `--write-dir`. Repeat either flag for additional folders. Paths outside
+these roots, directory traversal and symlink escapes below the roots are
+refused. If no write directory is approved, conversion cannot create outputs.
+This is **not** an OS sandbox; use least-privilege credentials and client-side
+approval/sandboxing. Partial output files may persist
 if a batch is cancelled. Logs go to stderr; add `--verbose` for diagnostics.
 
 ## Full reference
