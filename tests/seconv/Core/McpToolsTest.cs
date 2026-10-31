@@ -389,5 +389,28 @@ public class McpToolsTest : IDisposable
         var failureText = ErrorText(failure);
         Assert.Contains("missing.srt", failureText);
         Assert.DoesNotContain(_tempDir, failureText);
+
+        // End-to-end through JSON-RPC, not a direct static tool invocation. Confirm a
+        // real write reaches disk while the stdio protocol remains intact and readable.
+        var output = Path.Combine(_tempDir, "mcp-converted.vtt");
+        var conversion = await client.CallToolAsync("convert_subtitle",
+            new Dictionary<string, object?>
+            {
+                ["inputs"] = new[] { Fixtures.Path("test.srt") },
+                ["format"] = "WebVTT",
+                ["outputFilename"] = output,
+            },
+            cancellationToken: ct);
+
+        Assert.True(Payload(conversion).GetProperty("success").GetBoolean());
+        Assert.True(File.Exists(output));
+        Assert.Contains("WEBVTT", await File.ReadAllTextAsync(output, ct));
+
+        // The server is still able to process calls after the potentially noisy
+        // conversion path: no progress logging has corrupted its stdout stream.
+        var afterConversion = await client.CallToolAsync("subtitle_info",
+            new Dictionary<string, object?> { ["path"] = output },
+            cancellationToken: ct);
+        Assert.Equal("WebVTT", Payload(afterConversion).GetProperty("format").GetString());
     }
 }
