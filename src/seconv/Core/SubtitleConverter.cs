@@ -435,10 +435,9 @@ internal class SubtitleConverter
 
         AuthorizeOutputPath(options, outputBase);
 
-        // Overwrite check is best-effort against the base path. Multi-stream DVDs land
-        // additional outputs at <stem>.<n>.sub which we can't predict without parsing —
-        // those existing files will be overwritten silently. Acceptable for now since
-        // multi-stream DVDs are rare and the user opted into the batch by passing all VOBs.
+        // Check the base path early. VobSubExtractor independently validates every
+        // stream-indexed .sub/.idx output pair before writing any stream, so
+        // --overwrite=false also protects DVD inputs with several subtitle tracks.
         if (!options.Overwrite)
         {
             var pair = new[] { outputBase, Path.ChangeExtension(outputBase, ".idx") };
