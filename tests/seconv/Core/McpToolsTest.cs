@@ -329,6 +329,7 @@ public class McpToolsTest : IDisposable
     [Theory]
     [InlineData("BdnXml")]
     [InlineData("BdnXml8Bit")]
+    [InlineData("ImscImage")]
     [InlineData("Dost")]
     [InlineData("FcpImage")]
     [InlineData("DCinemaInterop")]
@@ -344,7 +345,6 @@ public class McpToolsTest : IDisposable
     [InlineData("BluRaySup")]
     [InlineData("DvdSup")]
     [InlineData("VobSub")]
-    [InlineData("ImscImage")]
     [InlineData("DCinemaSmpte2014PngMxf")]
     [InlineData("WebVTT")]
     public void SingleFileAndValidatedPairTargets_RemainSupported(string format)
