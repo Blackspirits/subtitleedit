@@ -326,6 +326,44 @@ public class McpToolsTest : IDisposable
         Assert.Equal([first, Path.ChangeExtension(first, ".idx"), second, secondIdx], checkedPaths);
     }
 
+    [Theory]
+    [InlineData("BdnXml")]
+    [InlineData("BdnXml8Bit")]
+    [InlineData("Dost")]
+    [InlineData("FcpImage")]
+    [InlineData("DCinemaInterop")]
+    [InlineData("DCinemaSmpte2014")]
+    [InlineData("ImagesWithTimeCodes")]
+    [InlineData("WebVttThumbnail")]
+    public void MultiFileImageTargets_AreNotExposedThroughMcp(string format)
+    {
+        Assert.True(SubtitleTools.IsUnsupportedMultiFileImageTarget(format));
+    }
+
+    [Theory]
+    [InlineData("BluRaySup")]
+    [InlineData("DvdSup")]
+    [InlineData("VobSub")]
+    [InlineData("ImscImage")]
+    [InlineData("DCinemaSmpte2014PngMxf")]
+    [InlineData("WebVTT")]
+    public void SingleFileAndValidatedPairTargets_RemainSupported(string format)
+    {
+        Assert.False(SubtitleTools.IsUnsupportedMultiFileImageTarget(format));
+    }
+
+    [Fact]
+    public async Task ConvertSubtitle_MultiFileImageTarget_IsRejectedBeforeWriting()
+    {
+        var message = ErrorText(await SubtitleTools.ConvertSubtitle(
+            inputs: [Fixtures.Path("test.srt")],
+            format: "BdnXml",
+            outputFolder: _tempDir));
+
+        Assert.Contains("additional output files", message);
+        Assert.Empty(Directory.GetFiles(_tempDir));
+    }
+
     [Fact]
     public void ListFormats_FilterMatchesIdNameAndExtension()
     {
