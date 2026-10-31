@@ -265,6 +265,7 @@ internal sealed class SubtitleTools
                 Format = format,
                 OutputFolder = outputFolder,
                 OutputFilename = outputFilename,
+                ValidateOutputPath = _pathPolicy is null ? null : _pathPolicy.RequireWrite,
                 Encoding = encoding,
                 Overwrite = overwrite,
                 Offset = string.IsNullOrWhiteSpace(offset) ? null : ParseClientInput(() => OffsetParser.Parse(offset)),
