@@ -285,11 +285,28 @@ public class McpToolsTest : IDisposable
         File.Delete(output);
         File.WriteAllText(output, "existing output");
         var fallback = Path.Combine(write, "movie_2.vtt");
-        File.CreateSymbolicLink(fallback, Path.Combine(outside, "missing.vtt"));
-        Assert.False(File.Exists(fallback));
-        Assert.Throws<ModelContextProtocol.McpException>(() =>
-            SeConv.Core.SubtitleConverter.ResolveOutputFileName(
-                input, options with { Overwrite = false }));
+        var missingTarget = Path.Combine(outside, "missing.vtt");
+        File.CreateSymbolicLink(fallback, missingTarget);
+        Assert.False(File.Exists(missingTarget));
+        // Runtimes differ on File.Exists(danglingLink): some count the
+        // symlink itself, others follow the missing target. Regardless,
+        // the policy must reject the link if it is ever selected for writing.
+        Assert.Throws<ModelContextProtocol.McpException>(() => policy.RequireWrite(fallback));
+        if (File.Exists(fallback))
+        {
+            // The converter skips an occupied filename; no write uses this link.
+            var chosen = SeConv.Core.SubtitleConverter.ResolveOutputFileName(
+                input, options with { Overwrite = false });
+            Assert.NotEqual(fallback, chosen);
+            policy.RequireWrite(chosen);
+        }
+        else
+        {
+            // If File.Exists reports false, _2 is selected and must be denied.
+            Assert.Throws<ModelContextProtocol.McpException>(() =>
+                SeConv.Core.SubtitleConverter.ResolveOutputFileName(
+                    input, options with { Overwrite = false }));
+        }
     }
 
     [Fact]
