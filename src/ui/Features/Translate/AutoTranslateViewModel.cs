@@ -2738,19 +2738,19 @@ public partial class AutoTranslateViewModel : ObservableObject
 
             foreach (var variant in variants)
             {
-                var matches = languages
+                var variantMatches = languages
                     .Where(p => variant.Equals(p.Code, StringComparison.OrdinalIgnoreCase) ||
                                 variant.Equals(p.Name, StringComparison.OrdinalIgnoreCase) ||
                                 variant.Equals(p.TwoLetterIsoLanguageName, StringComparison.OrdinalIgnoreCase))
                     .Take(2)
                     .ToList();
 
-                if (matches.Count == 1)
+                if (variantMatches.Count == 1)
                 {
-                    return matches[0];
+                    return variantMatches[0];
                 }
 
-                if (matches.Count > 1)
+                if (variantMatches.Count > 1)
                 {
                     return null; // Multiple matching variants: do not guess.
                 }
