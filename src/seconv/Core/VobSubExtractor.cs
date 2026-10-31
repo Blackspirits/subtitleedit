@@ -40,7 +40,7 @@ internal static class VobSubExtractor
     /// is ripped cell by cell with exact time codes. Otherwise every VOB is read and the PTS
     /// restarts are stitched from the NAV packs.
     /// </summary>
-    public static ExtractionResult Extract(IReadOnlyList<string> vobFiles, string subOutputPath, int? dvdTitleNumber = null)
+    public static ExtractionResult Extract(IReadOnlyList<string> vobFiles, string subOutputPath, int? dvdTitleNumber = null, Action<string>? validateOutputPath = null)
     {
         if (vobFiles.Count == 0)
         {
@@ -114,6 +114,11 @@ internal static class VobSubExtractor
             var outputPath = streams.Count == 1
                 ? subOutputPath
                 : InsertStreamIndex(subOutputPath, i);
+
+            // A DVD may produce several stream-indexed .sub/.idx pairs.
+            // Validate each real destination before the pair is written.
+            validateOutputPath?.Invoke(outputPath);
+            validateOutputPath?.Invoke(Path.ChangeExtension(outputPath, ".idx"));
 
             var languageCode = ifo?.GetLanguageCode(streamId);
             var language = string.IsNullOrEmpty(languageCode) ? null : DvdSubtitleLanguage.GetLanguageOrNull(languageCode);
