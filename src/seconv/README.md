@@ -82,7 +82,7 @@ Known VobSub `.sub`/`.idx` and DVD `.IFO`/`.VOB` companions are checked before r
 and resolved output paths are checked before writing. Image targets that produce
 additional PNG/XML files are unavailable through MCP until their individual paths
 can be validated; use the CLI for those exports. Explicit VobSub output names must end in `.sub` so the `.idx` companion is checked. Other format loaders may still
-access auxiliary files. This is **not** an OS sandbox; use least-privilege credentials and client-side
+access auxiliary files. Image-list inputs (e.g. BDN XML, SON, DOST and SRT referring to PNGs) are blocked in MCP because their referenced images are not individually authorized. This is **not** an OS sandbox; use least-privilege credentials and client-side
 approval/sandboxing. Partial output files may persist
 if a batch is cancelled. Logs go to stderr; add `--verbose` for diagnostics.
 
