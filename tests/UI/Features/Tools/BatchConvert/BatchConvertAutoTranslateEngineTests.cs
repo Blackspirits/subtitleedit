@@ -159,6 +159,36 @@ public class BatchConvertAutoTranslateEngineTests
         }
     }
 
+    [AvaloniaFact]
+    public void LoadSettings_RestoresTheSavedNllbTraditionalChineseVariant()
+    {
+        var batchSettings = Se.Settings.Tools.BatchConvert;
+        var oldEngine = batchSettings.AutoTranslateEngine;
+        var oldSource = batchSettings.AutoTranslateSourceLanguage;
+        var oldTarget = batchSettings.AutoTranslateTargetLanguage;
+        try
+        {
+            batchSettings.AutoTranslateEngine = NoLanguageLeftBehindServe.StaticName;
+            batchSettings.AutoTranslateSourceLanguage = "eng_Latn";
+            batchSettings.AutoTranslateTargetLanguage = "zho_Hant";
+
+            var vm = MakeViewModel();
+            typeof(BatchConvertViewModel).GetMethod(
+                "LoadSettings", System.Reflection.BindingFlags.NonPublic |
+                                System.Reflection.BindingFlags.Instance)!.Invoke(vm, null);
+
+            Assert.IsType<NoLanguageLeftBehindServe>(vm.SelectedAutoTranslator);
+            Assert.Equal("eng_Latn", vm.SelectedSourceLanguage?.Code);
+            Assert.Equal("zho_Hant", vm.SelectedTargetLanguage?.Code);
+        }
+        finally
+        {
+            batchSettings.AutoTranslateEngine = oldEngine;
+            batchSettings.AutoTranslateSourceLanguage = oldSource;
+            batchSettings.AutoTranslateTargetLanguage = oldTarget;
+        }
+    }
+
     private static BatchConvertViewModel MakeViewModel()
     {
         var services = new ServiceCollection();
