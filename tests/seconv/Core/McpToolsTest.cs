@@ -293,6 +293,23 @@ public class McpToolsTest : IDisposable
     }
 
     [Fact]
+    public void VobSubStreamOutputPreflight_BlocksExistingIndexedPairs()
+    {
+        var first = Path.Combine(_tempDir, "movie.0.sub");
+        var second = Path.Combine(_tempDir, "movie.1.sub");
+        var secondIdx = Path.ChangeExtension(second, ".idx");
+        File.WriteAllText(secondIdx, "existing index");
+
+        Assert.Throws<InvalidOperationException>(() =>
+            SeConv.Core.VobSubExtractor.ValidateOutputPairs([first, second], false));
+        Assert.False(File.Exists(first));
+
+        var checkedPaths = new List<string>();
+        SeConv.Core.VobSubExtractor.ValidateOutputPairs([first, second], true, checkedPaths.Add);
+        Assert.Equal([first, Path.ChangeExtension(first, ".idx"), second, secondIdx], checkedPaths);
+    }
+
+    [Fact]
     public void ListFormats_FilterMatchesIdNameAndExtension()
     {
         var all = Payload(SubtitleTools.ListFormats());
