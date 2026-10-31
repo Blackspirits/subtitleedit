@@ -128,6 +128,11 @@ internal class Program
             {
                 return RunLintCommand(args.Skip(1).ToArray());
             }
+            if (first.Equals("mcp", StringComparison.OrdinalIgnoreCase))
+            {
+                // MCP owns stdout: JSON-RPC frames only. Diagnostics go to stderr.
+                return Mcp.McpServerHost.RunAsync(args.Skip(1).ToArray()).GetAwaiter().GetResult();
+            }
         }
 
         // Capture the raw args so the convert command can recover operation order/repetition
