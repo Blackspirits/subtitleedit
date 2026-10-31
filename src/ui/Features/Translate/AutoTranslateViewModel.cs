@@ -2667,122 +2667,155 @@ public partial class AutoTranslateViewModel : ObservableObject
     /// The entry for a saved code or name, however the engine spells it: a code ("zh-CN",
     /// "zho_Hans"), an English name ("Chinese"), or the ISO code behind either.
     /// </summary>
-    private static TranslationPair? FindLanguage(IList<TranslationPair> languages, string? codeOrName)
+    // Saved settings refer to the provider that last wrote them. In particular the old
+    // two-letter "pt" was European Portuguese in Gemini/ChatGPT, but Brazilian Portuguese
+    // in Google V1. Use provider metadata only when it is known, never infer a missing script.
+    internal static string? NormalizeSavedLanguageCode(string? code, string? savedProviderName)
+    {
+        if (!string.Equals(code, "pt", StringComparison.OrdinalIgnoreCase))
+        {
+            return code;
+        }
+
+        if (string.Equals(savedProviderName, GoogleTranslateV1.StaticName, StringComparison.OrdinalIgnoreCase))
+        {
+            return "pt-BR";
+        }
+
+        if (string.Equals(savedProviderName, GeminiTranslate.StaticName, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(savedProviderName, ChatGptTranslate.StaticName, StringComparison.OrdinalIgnoreCase))
+        {
+            return "pt-PT";
+        }
+
+        return code; // Historical codes without a known provider are inherently ambiguous.
+    }
+
+    // Deliberately no lossy lookup of a script-qualified language by its bare ISO prefix.
+    // Mapped aliases are only accepted when they pick exactly one current-provider entry.
+    internal static TranslationPair? FindLanguage(IList<TranslationPair> languages, string? codeOrName)
     {
         if (string.IsNullOrWhiteSpace(codeOrName))
         {
             return null;
         }
 
-        var direct = languages.FirstOrDefault(p => codeOrName.Equals(p.Code, StringComparison.OrdinalIgnoreCase))
-                     ?? languages.FirstOrDefault(p => codeOrName.Equals(p.Name, StringComparison.OrdinalIgnoreCase))
-                     ?? languages.FirstOrDefault(p => codeOrName.Equals(p.TwoLetterIsoLanguageName, StringComparison.OrdinalIgnoreCase));
-        if (direct != null)
+        var exact = languages.FirstOrDefault(p => codeOrName.Equals(p.Code, StringComparison.OrdinalIgnoreCase))
+                    ?? languages.FirstOrDefault(p => codeOrName.Equals(p.Name, StringComparison.OrdinalIgnoreCase));
+        if (exact != null)
         {
-            return direct;
+            return exact;
         }
 
-        // Providers disagree on the separator used by script-qualified identifiers:
-        // NLLB uses "zho_Hans", while another engine may expose the same identifier as
-        // "zho-Hans". Treat those spellings as the same before falling back to ISO mapping.
-        var normalized = NormalizeLanguageIdentifier(codeOrName);
-        var normalizedMatch = languages.FirstOrDefault(p =>
-                                  normalized.Equals(NormalizeLanguageIdentifier(p.Code), StringComparison.OrdinalIgnoreCase))
-                              ?? languages.FirstOrDefault(p =>
-                                  normalized.Equals(NormalizeLanguageIdentifier(p.TwoLetterIsoLanguageName), StringComparison.OrdinalIgnoreCase));
-        if (normalizedMatch != null)
+        var identifier = NormalizeLanguageIdentifier(codeOrName);
+        var normalizedExact = languages.Where(p =>
+                identifier.Equals(NormalizeLanguageIdentifier(p.Code), StringComparison.OrdinalIgnoreCase) ||
+                identifier.Equals(NormalizeLanguageIdentifier(p.Name), StringComparison.OrdinalIgnoreCase))
+            .Take(2).ToList();
+        if (normalizedExact.Count == 1)
         {
-            return normalizedMatch;
+            return normalizedExact[0];
+        }
+        if (normalizedExact.Count > 1)
+        {
+            return null;
+        }
+
+        // Known script/regional variants across NLLB, Google and LLM APIs. Use Code/Name
+        // only: TwoLetterIsoLanguageName can collapse distinct scripts into the same "zh".
+        // NLLB "por_Latn" is language-only, with no PT/BR distinction; the default here
+        // follows its European Portuguese naming. It cannot reconstruct an unknown choice.
+        string[][] aliases =
+        {
+            new[] { "zho_Hans", "zh-Hans", "zh-CN", "Chinese (Simplified)", "CHINESE_SIMPLIFIED" },
+            new[] { "zho_Hant", "zh-Hant", "zh-TW", "Chinese (Traditional)", "CHINESE_TRADITIONAL" },
+            new[] { "pt-PT", "por_Latn", "Portuguese", "PORTUGUESE" },
+            new[] { "pt-BR", "Brazilian Portuguese", "PORTUGUESE (BRAZIL)" },
+            new[] { "yue_Hant", "Cantonese", "Yue Chinese" },
+        };
+
+        foreach (var group in aliases)
+        {
+            if (!group.Any(alias => identifier.Equals(NormalizeLanguageIdentifier(alias), StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            var groupMatches = languages.Where(p => group.Any(alias =>
+                    alias.Equals(p.Code, StringComparison.OrdinalIgnoreCase) ||
+                    alias.Equals(p.Name, StringComparison.OrdinalIgnoreCase)))
+                .Take(2).ToList();
+            return groupMatches.Count == 1 ? groupMatches[0] : null;
+        }
+
+        // Exact provider ISO metadata may be shared by several entries (e.g. zh for both
+        // Chinese scripts in NLLB, ks for two Kashmiri scripts). Never pick the first.
+        var isoMatches = languages.Where(p =>
+                identifier.Equals(NormalizeLanguageIdentifier(p.TwoLetterIsoLanguageName), StringComparison.OrdinalIgnoreCase))
+            .Take(2).ToList();
+        if (isoMatches.Count == 1)
+        {
+            return isoMatches[0];
+        }
+        if (isoMatches.Count > 1)
+        {
+            return null;
+        }
+
+        // NLLB includes individual ISO-639-3 language identifiers, not all of which are
+        // covered by ISO-639-2. Translate only known language-equivalent prefixes.
+        var dash = identifier.IndexOf('-');
+        var prefix = dash >= 0 ? identifier[..dash] : identifier;
+        if (prefix.Length != 3)
+        {
+            return null;
+        }
+
+        var iso = prefix.ToLowerInvariant() switch
+        {
+            "arb" => "ar", // Modern Standard Arabic
+            "pes" => "fa", // Western Persian
+            "zsm" => "ms", // Standard Malay
+            "nob" => "no", // Bokmål -> generic Norwegian where no variant exists
+            "yue" => "yue", // Cantonese
+            _ => Iso639Dash2LanguageCode.GetTwoLetterCodeFromThreeLetterCode(prefix),
+        };
+        if (string.IsNullOrEmpty(iso))
+        {
+            return null;
+        }
+
+        // Prefix conversion must not discard an unknown writing system. If an identifier
+        // specifies an unrecognised script/region, only direct or known-group matches work.
+        if (dash >= 0 && (iso == "zh" || iso == "ks") &&
+            !identifier.Equals("kas-Arab", StringComparison.OrdinalIgnoreCase) &&
+            !identifier.Equals("kas-Deva", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var isoCodeMatches = languages.Where(p => iso.Equals(p.Code, StringComparison.OrdinalIgnoreCase) ||
+                                                  iso.Equals(p.TwoLetterIsoLanguageName, StringComparison.OrdinalIgnoreCase))
+            .Take(2).ToList();
+        if (isoCodeMatches.Count == 1)
+        {
+            return isoCodeMatches[0];
+        }
+        if (isoCodeMatches.Count > 1)
+        {
+            return null;
         }
 
         var englishName = Iso639Dash2LanguageCode.List
-            .FirstOrDefault(l => l.TwoLetterCode.Equals(codeOrName, StringComparison.OrdinalIgnoreCase))?.EnglishName;
-        if (englishName != null)
-        {
-            var byEnglishName = languages.FirstOrDefault(p => englishName.Equals(p.Name, StringComparison.OrdinalIgnoreCase));
-            if (byEnglishName != null)
-            {
-                return byEnglishName;
-            }
-        }
-
-        // NLLB-style identifiers start with ISO-639-3 (eng_Latn, deu_Latn, ...). Convert that
-        // prefix to ISO-639-1, then prefer an exact English-name match. If the current engine has
-        // several variants sharing the same two-letter code and no exact name (e.g. Chinese
-        // variants), fail closed instead of silently selecting the first one.
-        var separatorIndex = normalized.IndexOf('-');
-        var threeLetter = separatorIndex > 0 ? normalized[..separatorIndex] : normalized;
-        if (threeLetter.Length != 3)
+            .FirstOrDefault(l => l.TwoLetterCode.Equals(iso, StringComparison.OrdinalIgnoreCase))?.EnglishName;
+        if (englishName == null)
         {
             return null;
         }
 
-        var twoLetter = Iso639Dash2LanguageCode.GetTwoLetterCodeFromThreeLetterCode(threeLetter);
-        if (string.IsNullOrEmpty(twoLetter))
-        {
-            return null;
-        }
-
-        // Keep Chinese script variants when moving away from an NLLB engine. NLLB uses
-        // zho_Hans / zho_Hant, whereas Google-style providers use zh-CN / zh-Hant
-        // (or zh-TW) and LLM engines use descriptive language names. A generic "zh"
-        // match would silently choose a potentially wrong script.
-        if (twoLetter.Equals("zh", StringComparison.OrdinalIgnoreCase) && separatorIndex > 0)
-        {
-            var script = normalized[(separatorIndex + 1)..];
-            string[] variants;
-            if (script.Equals("Hans", StringComparison.OrdinalIgnoreCase))
-            {
-                variants = new[] { "zh-Hans", "zh-CN", "Chinese (Simplified)" };
-            }
-            else if (script.Equals("Hant", StringComparison.OrdinalIgnoreCase))
-            {
-                variants = new[] { "zh-Hant", "zh-TW", "Chinese (Traditional)" };
-            }
-            else
-            {
-                return null; // Unknown script: never silently select another variant.
-            }
-
-            foreach (var variant in variants)
-            {
-                var variantMatches = languages
-                    .Where(p => variant.Equals(p.Code, StringComparison.OrdinalIgnoreCase) ||
-                                variant.Equals(p.Name, StringComparison.OrdinalIgnoreCase) ||
-                                variant.Equals(p.TwoLetterIsoLanguageName, StringComparison.OrdinalIgnoreCase))
-                    .Take(2)
-                    .ToList();
-
-                if (variantMatches.Count == 1)
-                {
-                    return variantMatches[0];
-                }
-
-                if (variantMatches.Count > 1)
-                {
-                    return null; // Multiple matching variants: do not guess.
-                }
-            }
-
-            return null; // Script-qualified source cannot fall back to generic Chinese.
-        }
-
-        englishName = Iso639Dash2LanguageCode.List
-            .FirstOrDefault(l => l.TwoLetterCode.Equals(twoLetter, StringComparison.OrdinalIgnoreCase))?.EnglishName;
-        if (englishName != null)
-        {
-            var byEnglishName = languages.FirstOrDefault(p => englishName.Equals(p.Name, StringComparison.OrdinalIgnoreCase));
-            if (byEnglishName != null)
-            {
-                return byEnglishName;
-            }
-        }
-
-        var matches = languages
-            .Where(p => twoLetter.Equals(p.TwoLetterIsoLanguageName, StringComparison.OrdinalIgnoreCase))
-            .Take(2)
-            .ToList();
-        return matches.Count == 1 ? matches[0] : null;
+        var byName = languages.Where(p => englishName.Equals(p.Name, StringComparison.OrdinalIgnoreCase))
+            .Take(2).ToList();
+        return byName.Count == 1 ? byName[0] : null;
     }
 
     private static string NormalizeLanguageIdentifier(string? value)
