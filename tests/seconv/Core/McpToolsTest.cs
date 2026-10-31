@@ -196,6 +196,23 @@ public class McpToolsTest : IDisposable
     }
 
     [Fact]
+    public void PathPolicy_RejectsLegacyCommaPatternSplitting()
+    {
+        var cwd = Directory.GetCurrentDirectory();
+        var policy = new McpPathPolicy([cwd], [cwd]);
+
+        // A validated relative path such as "safe/file.srt,../outside.srt"
+        // must not become multiple unchecked CLI inputs during conversion.
+        Assert.Throws<ModelContextProtocol.McpException>(() =>
+            policy.RequireReadPattern("safe/file.srt,../outside.srt"));
+        Assert.Throws<ModelContextProtocol.McpException>(() =>
+            policy.RequireConversionPaths(["safe/file.srt,../outside.srt"], cwd, null));
+
+        // Absolute paths containing commas are literal names, not split by seconv.
+        policy.RequireReadPattern(Path.Combine(cwd, "movie, director-cut.srt"));
+    }
+
+    [Fact]
     public void PathPolicy_RejectsUnauthorizedDvdSidecars()
     {
         if (OperatingSystem.IsWindows())
