@@ -297,6 +297,46 @@ public class AutoTranslateModelAndSourceTests
     }
 
     [Fact]
+    public void LegacyGeminiEuropeanIso_MapsToEuropeanGoogleV2()
+    {
+        var google = new GoogleTranslateV2();
+        var targets = google.GetSupportedTargetLanguages();
+        var english = targets.Single(p => p.Code == "en");
+        var selected = AutoTranslateViewModel.FindDefaultTargetLanguage(
+            targets, english, lastTarget: "pt", uiCultureName: "en-US",
+            savedProviderName: GeminiTranslate.StaticName);
+        Assert.NotNull(selected);
+        Assert.Equal("pt-PT", selected.Code);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RememberGoogleBrazilianLanguage_StoresExplicitRegion(bool useV2)
+    {
+        var previousSource = Se.Settings.AutoTranslate.AutoTranslateLastSource;
+        var previousTarget = Se.Settings.AutoTranslate.AutoTranslateLastTarget;
+        try
+        {
+            var languages = useV2
+                ? new GoogleTranslateV2().GetSupportedTargetLanguages()
+                : new GoogleTranslateV1().GetSupportedTargetLanguages();
+            var source = languages.Single(p => p.Code == "en");
+            var target = languages.Single(p => p.Name == "PORTUGUESE (BRAZIL)");
+
+            AutoTranslateViewModel.RememberLanguageCodes(source, target);
+
+            Assert.Equal("en", Se.Settings.AutoTranslate.AutoTranslateLastSource);
+            Assert.Equal("pt-BR", Se.Settings.AutoTranslate.AutoTranslateLastTarget);
+        }
+        finally
+        {
+            Se.Settings.AutoTranslate.AutoTranslateLastSource = previousSource;
+            Se.Settings.AutoTranslate.AutoTranslateLastTarget = previousTarget;
+        }
+    }
+
+    [Fact]
     public void LegacyGoogleBrazilianIso_RemainsBrazilian()
     {
         var google = new GoogleTranslateV1();
