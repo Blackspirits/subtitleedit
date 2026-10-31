@@ -168,7 +168,7 @@ Known VobSub `.sub`/`.idx` and DVD `.IFO`/`.VOB` companions are checked,
 and resolved output destinations (including collision suffixes) are validated before writes.
 Image formats that generate additional PNG/XML sidecar files or output folders are
 blocked by MCP until those secondary destinations can be individually checked.
-The regular CLI remains available for these formats.
+The regular CLI remains available for these formats. Explicit VobSub output filenames must end with `.sub` to ensure validation of their `.idx` companions.
 There is still a possible check/use race for filesystem objects that another
 process can mutate, and other format loaders may inspect additional companion files.
 Run the server with least-privilege OS permissions and use your MCP client's
