@@ -81,7 +81,7 @@ refused. If no write directory is approved, conversion cannot create outputs.
 Known VobSub `.sub`/`.idx` and DVD `.IFO`/`.VOB` companions are checked before reading,
 and resolved output paths are checked before writing. Image targets that produce
 additional PNG/XML files are unavailable through MCP until their individual paths
-can be validated; use the CLI for those exports. Other format loaders may still
+can be validated; use the CLI for those exports. Explicit VobSub output names must end in `.sub` so the `.idx` companion is checked. Other format loaders may still
 access auxiliary files. This is **not** an OS sandbox; use least-privilege credentials and client-side
 approval/sandboxing. Partial output files may persist
 if a batch is cancelled. Logs go to stderr; add `--verbose` for diagnostics.
