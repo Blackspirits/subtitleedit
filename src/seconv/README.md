@@ -62,6 +62,23 @@ An unrecognised option is an error, never a silent no-op: `seconv` exits 1 and n
 real option rather than converting the file without the operation that was asked for. Exit codes
 are only ever 0 (success) or 1 (any failure).
 
+## MCP server
+
+Run `seconv mcp` to expose local subtitle inspection and conversion over
+[Model Context Protocol](https://modelcontextprotocol.io) stdio:
+
+```json
+{ "mcpServers": { "seconv": { "command": "seconv", "args": ["mcp"] } } }
+```
+
+The server provides `list_formats`, `subtitle_info`, `read_subtitle`,
+`lint_subtitle`, `convert_subtitle`, `list_fix_common_errors_rules`,
+and `list_remove_formatting_rules`. The conversion tool can modify files.
+There is **no built-in filesystem sandbox**: it runs under the local user's
+filesystem permissions, and `overwrite=true` can replace existing output.
+Use client-side tool approval and sandboxing. Partial output files may persist
+if a batch is cancelled. Logs go to stderr; add `--verbose` for diagnostics.
+
 ## Full reference
 
 ➡ **[Command Line (seconv) — full reference](../../docs/reference/command-line.md)**
