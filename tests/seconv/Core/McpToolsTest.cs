@@ -43,18 +43,81 @@ public class McpToolsTest : IDisposable
     [InlineData("-v", true)]
     public void McpServerHost_ParsesSupportedArguments(string? argument, bool expectedVerbose)
     {
-        var args = argument is null ? Array.Empty<string>() : [argument];
-        Assert.True(McpServerHost.TryParseArguments(args, out var verbose, out var error));
+        string[] args = argument is null ? ["--read-dir", _tempDir] : ["--read-dir", _tempDir, argument];
+        Assert.True(McpServerHost.TryParseArguments(args, out var verbose,
+            out var reads, out var writes, out var error));
         Assert.Equal(expectedVerbose, verbose);
+        Assert.Equal(_tempDir, Assert.Single(reads));
+        Assert.Empty(writes);
         Assert.Null(error);
     }
 
     [Fact]
     public void McpServerHost_RejectsUnknownArguments()
     {
-        Assert.False(McpServerHost.TryParseArguments(["--bogus"], out _, out var error));
+        Assert.False(McpServerHost.TryParseArguments(["--bogus"], out _, out _, out _, out var error));
         Assert.NotNull(error);
         Assert.Contains("--bogus", error);
+    }
+
+    [Fact]
+    public void McpServerHost_RejectsMissingRootAndDanglingOptions()
+    {
+        Assert.False(McpServerHost.TryParseArguments([], out _, out _, out _, out var missing));
+        Assert.Contains("--read-dir", missing);
+        Assert.False(McpServerHost.TryParseArguments(["--read-dir"], out _, out _, out _, out var bad));
+        Assert.Contains("Missing directory", bad);
+    }
+
+    [Fact]
+    public void PathPolicy_DeniesTraversalAndUnapprovedWrites()
+    {
+        var root = Path.Combine(_tempDir, "approved");
+        Directory.CreateDirectory(root);
+        var policy = new McpPathPolicy([root], []);
+
+        policy.RequireRead(Path.Combine(root, "movie.srt"));
+        policy.RequireRead(Path.Combine(root, "nested", "..", "movie.srt"));
+        Assert.Throws<ModelContextProtocol.McpException>(() =>
+            policy.RequireRead(Path.Combine(root, "..", "outside.srt")));
+        Assert.Throws<ModelContextProtocol.McpException>(() =>
+            policy.RequireRead(root + "-other/movie.srt"));
+        Assert.Throws<ModelContextProtocol.McpException>(() =>
+            policy.RequireWrite(Path.Combine(root, "translated.srt")));
+        Assert.Throws<ModelContextProtocol.McpException>(() =>
+            policy.RequireConversionPaths([Path.Combine(root, "*.srt")], null, null));
+        Assert.Throws<ModelContextProtocol.McpException>(() =>
+            policy.RequireReadPattern(Path.Combine(root, "*", "movie.srt")));
+
+        var writer = new McpPathPolicy([root], [root]);
+        writer.RequireConversionPaths([Path.Combine(root, "*.srt")], root, "movie.vtt");
+        Assert.Throws<ModelContextProtocol.McpException>(() =>
+            writer.RequireConversionPaths([Path.Combine(root, "*.srt")], root, "../escape.vtt"));
+        Assert.Throws<ModelContextProtocol.McpException>(() =>
+            writer.RequireConversionPaths([Path.Combine(root, "*.srt")], "..", "escape.vtt"));
+    }
+
+    [Fact]
+    public void PathPolicy_RefusesSymlinkEscape()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            // Developer mode or privileges may be needed to create Windows symlinks.
+            return;
+        }
+
+        var root = Path.Combine(_tempDir, "allowed");
+        var outside = Path.Combine(_tempDir, "outside");
+        Directory.CreateDirectory(root);
+        Directory.CreateDirectory(outside);
+        var link = Path.Combine(root, "link");
+        Directory.CreateSymbolicLink(link, outside);
+        var policy = new McpPathPolicy([root], [root]);
+
+        Assert.Throws<ModelContextProtocol.McpException>(() =>
+            policy.RequireRead(Path.Combine(link, "private.srt")));
+        Assert.Throws<ModelContextProtocol.McpException>(() =>
+            policy.RequireWrite(Path.Combine(link, "changed.srt")));
     }
 
     [Fact]
@@ -337,7 +400,13 @@ public class McpToolsTest : IDisposable
         {
             Name = "seconv",
             Command = "dotnet",
-            Arguments = [dll, "mcp"],
+            Arguments =
+            [
+                dll, "mcp",
+                "--read-dir", Path.GetDirectoryName(Fixtures.Path("test.srt"))!,
+                "--read-dir", _tempDir,
+                "--write-dir", _tempDir,
+            ],
         });
 
         var ct = TestContext.Current.CancellationToken;

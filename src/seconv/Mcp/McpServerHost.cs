@@ -21,13 +21,26 @@ internal static class McpServerHost
         "its paragraphs (any format, paged); lint_subtitle to find timing/line-length problems; " +
         "convert_subtitle to write a new file in another format, optionally shifting times, changing " +
         "frame rate or applying operations such as FixCommonErrors. Paths are local file-system paths. " +
-        "The server does not add a filesystem sandbox; access is limited by the operating-system permissions of the seconv process.";
+        "Paths are restricted to explicitly approved read/write directories. " +
+        "This path policy is not an OS filesystem sandbox; apply client approval and OS permissions.";
 
     public static async Task<int> RunAsync(string[] args)
     {
-        if (!TryParseArguments(args, out var verbose, out var error))
+        if (!TryParseArguments(args, out var verbose, out var readDirs, out var writeDirs, out var error))
         {
             Console.Error.WriteLine(error);
+            return 1;
+        }
+
+        try
+        {
+            // Fail closed before opening the protocol transport. Each stdio server
+            // process receives an explicit, immutable set of readable/writable roots.
+            SubtitleTools.ConfigurePathPolicy(new McpPathPolicy(readDirs, writeDirs));
+        }
+        catch (ArgumentException ex)
+        {
+            Console.Error.WriteLine(ex.Message);
             return 1;
         }
 
@@ -54,13 +67,19 @@ internal static class McpServerHost
         return 0;
     }
 
-    internal static bool TryParseArguments(string[] args, out bool verbose, out string? error)
+    internal static bool TryParseArguments(string[] args, out bool verbose,
+        out string[] readDirs, out string[] writeDirs, out string? error)
     {
         verbose = false;
         error = null;
+        var reads = new List<string>();
+        var writes = new List<string>();
+        readDirs = [];
+        writeDirs = [];
 
-        foreach (var arg in args)
+        for (var i = 0; i < args.Length; i++)
         {
+            var arg = args[i];
             if (arg.Equals("--verbose", StringComparison.OrdinalIgnoreCase) ||
                 arg.Equals("-v", StringComparison.OrdinalIgnoreCase))
             {
@@ -68,10 +87,33 @@ internal static class McpServerHost
                 continue;
             }
 
-            error = $"Unknown mcp option '{arg}'. Usage: seconv mcp [--verbose]";
+            var isRead = arg.Equals("--read-dir", StringComparison.OrdinalIgnoreCase);
+            var isWrite = arg.Equals("--write-dir", StringComparison.OrdinalIgnoreCase);
+            if (isRead || isWrite)
+            {
+                if (++i >= args.Length || string.IsNullOrWhiteSpace(args[i]) ||
+                    args[i].StartsWith('-'))
+                {
+                    error = $"Missing directory after '{arg}'. Usage: seconv mcp --read-dir <folder> [--write-dir <folder>]";
+                    return false;
+                }
+
+                (isRead ? reads : writes).Add(args[i]);
+                continue;
+            }
+
+            error = $"Unknown mcp option '{arg}'. Usage: seconv mcp --read-dir <folder> [--write-dir <folder>] [--verbose]";
             return false;
         }
 
+        if (reads.Count == 0)
+        {
+            error = "A --read-dir directory is required. MCP filesystem access is denied by default.";
+            return false;
+        }
+
+        readDirs = reads.ToArray();
+        writeDirs = writes.ToArray();
         return true;
     }
 }

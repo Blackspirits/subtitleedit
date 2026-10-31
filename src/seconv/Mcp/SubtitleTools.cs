@@ -33,6 +33,15 @@ internal sealed class SubtitleTools
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
+    // Installed once on server startup; never changed during an MCP session.
+    // Direct in-process unit tests call the methods without starting the server.
+    private static McpPathPolicy? _pathPolicy;
+
+    internal static void ConfigurePathPolicy(McpPathPolicy policy)
+    {
+        _pathPolicy = policy;
+    }
+
     private const int DefaultReadCount = 100;
     private const int MaxReadCount = 1000;
 
@@ -71,7 +80,11 @@ internal sealed class SubtitleTools
     public static CallToolResult SubtitleInfo(
         [Description("Path to the subtitle file.")] string path,
         CancellationToken cancellationToken = default)
-        => Run(() => SubtitleInfoGatherer.Gather(path), cancellationToken);
+        => Run(() =>
+        {
+            _pathPolicy?.RequireRead(path);
+            return SubtitleInfoGatherer.Gather(path);
+        }, cancellationToken);
 
     [McpServerTool(Name = "read_subtitle", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Read the paragraphs (number, start/end time, text) of a subtitle file in any supported text or binary format, paged. Use this instead of reading the raw file when the format is not plain SRT/VTT.")]
@@ -83,6 +96,7 @@ internal sealed class SubtitleTools
         CancellationToken cancellationToken = default)
         => Run(() =>
         {
+            _pathPolicy?.RequireRead(path);
             var (subtitle, format) = LibSEIntegration.LoadSubtitleWithFormat(path, encoding);
             var total = subtitle.Paragraphs.Count;
             var first = Math.Max(1, start);
@@ -119,7 +133,11 @@ internal sealed class SubtitleTools
     public static CallToolResult LintSubtitle(
         [Description("Path to the subtitle file.")] string path,
         CancellationToken cancellationToken = default)
-        => Run(() => SubtitleLinter.Lint(path), cancellationToken);
+        => Run(() =>
+        {
+            _pathPolicy?.RequireRead(path);
+            return SubtitleLinter.Lint(path);
+        }, cancellationToken);
 
     [McpServerTool(Name = "list_fix_common_errors_rules", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("List the FixCommonErrors rule ids accepted by convert_subtitle's 'fixCommonErrorsRules' parameter, with the matching Subtitle Edit GUI label and the language gate (if any).")]
@@ -192,6 +210,10 @@ internal sealed class SubtitleTools
             {
                 throw new McpException("A target format is required. Use list_formats to see the ids.");
             }
+
+            // Validate every input and all possible output directories before any
+            // loader, converter or write is invoked. Access denied by default.
+            _pathPolicy?.RequireConversionPaths(inputs, outputFolder, outputFilename);
 
             var normalizedRequestedFormat = format.Replace(" ", string.Empty);
             if (normalizedRequestedFormat.Equals("customtext", StringComparison.OrdinalIgnoreCase) ||
