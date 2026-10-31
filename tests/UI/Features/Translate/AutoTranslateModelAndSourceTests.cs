@@ -160,6 +160,57 @@ public class AutoTranslateModelAndSourceTests
     }
 
     [Fact]
+    public void ScriptQualifiedNllbTraditionalChinese_MapsToCurrentProvider()
+    {
+        var translator = new GeminiTranslate();
+        var targets = translator.GetSupportedTargetLanguages();
+        var source = translator.GetSupportedSourceLanguages().First(p => p.Name == "English");
+
+        var selected = AutoTranslateViewModel.FindDefaultTargetLanguage(
+            targets,
+            source,
+            lastTarget: "zho_Hant",
+            uiCultureName: "en-US");
+
+        Assert.NotNull(selected);
+        Assert.Equal("Chinese (Traditional)", selected.Name);
+    }
+
+    [Fact]
+    public void ScriptQualifiedNllbSimplifiedChinese_MapsToGoogleStyleProvider()
+    {
+        var translator = new GoogleTranslateV1();
+        var targets = translator.GetSupportedTargetLanguages();
+        var source = translator.GetSupportedSourceLanguages().First(p => p.Name == "English");
+
+        var selected = AutoTranslateViewModel.FindDefaultTargetLanguage(
+            targets,
+            source,
+            lastTarget: "zho_Hans",
+            uiCultureName: "en-US");
+
+        Assert.NotNull(selected);
+        Assert.Contains(selected.Code, new[] { "zh-CN", "zh" });
+    }
+
+    [Fact]
+    public void UnknownChineseScript_DoesNotGuessTheWrongVariant()
+    {
+        var translator = new GeminiTranslate();
+        var targets = translator.GetSupportedTargetLanguages();
+        var source = translator.GetSupportedSourceLanguages().First(p => p.Name == "English");
+
+        var selected = AutoTranslateViewModel.FindDefaultTargetLanguage(
+            targets,
+            source,
+            lastTarget: "zho_UnknownScript",
+            uiCultureName: "fr-FR");
+
+        Assert.NotNull(selected);
+        Assert.Equal("French", selected.Name);
+    }
+
+    [Fact]
     public void DetectableSource_IsStillDetected()
     {
         var lastSource = Se.Settings.AutoTranslate.AutoTranslateLastSource;
