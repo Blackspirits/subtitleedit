@@ -310,6 +310,35 @@ public class McpToolsTest : IDisposable
     }
 
     [Fact]
+    public async Task McpConversion_RejectsImageListReferencesBeforeLoadingImages()
+    {
+        var read = Path.Combine(_tempDir, "image-list-input");
+        var write = Path.Combine(_tempDir, "image-list-output");
+        Directory.CreateDirectory(read);
+        Directory.CreateDirectory(write);
+        var input = Path.Combine(read, "images.srt");
+        File.WriteAllText(input,
+            "1\n00:00:01,000 --> 00:00:02,000\n../../private/0001.png\n\n" +
+            "2\n00:00:03,000 --> 00:00:04,000\n../../private/0002.png\n\n" +
+            "3\n00:00:05,000 --> 00:00:06,000\n../../private/0003.png\n\n");
+        var policy = new McpPathPolicy([read], [write]);
+        var options = new SeConv.Core.ConversionOptions
+        {
+            Patterns = [input],
+            Format = "WebVTT",
+            OutputFolder = write,
+            ValidateOutputPath = policy.RequireWrite,
+            Quiet = true,
+        };
+
+        var result = await new SeConv.Core.SubtitleConverter().ConvertAsync(options);
+        Assert.False(result.Success);
+        Assert.Contains(result.Errors,
+            error => error.Contains("referenced image paths", StringComparison.OrdinalIgnoreCase));
+        Assert.Empty(Directory.GetFileSystemEntries(write));
+    }
+
+    [Fact]
     public void VobSubOutputFallback_ReservesSubAndIdxAsAPair()
     {
         var input = Path.Combine(_tempDir, "movie.srt");
