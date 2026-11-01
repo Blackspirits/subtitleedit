@@ -76,6 +76,16 @@ internal sealed class McpPathPolicy
                 foreach (var vob in IfoParser.GetTitleVobFiles(titleIfo))
                 {
                     RequireRead(vob);
+                    // The extractor independently finds the title IFO by a
+                    // case-insensitive search of each VOB's directory. On
+                    // case-sensitive file systems, it may choose "vts_01_0.ifo"
+                    // even though the nominal "VTS_01_0.IFO" above does not
+                    // exist. Authorize the *actual* discovered path as well.
+                    var discoveredIfo = IfoParser.GetIfoFileName(vob);
+                    if (discoveredIfo is not null)
+                    {
+                        RequireRead(discoveredIfo);
+                    }
                 }
                 break;
             case ".vob":
