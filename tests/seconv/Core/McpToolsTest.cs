@@ -87,6 +87,34 @@ public class McpToolsTest : IDisposable
     }
 
     [Fact]
+    public void PathPolicy_RejectsLinkedAuthorizedRootsAndAncestorComponents()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return; // Creating directory links may need Developer Mode or elevation.
+        }
+
+        var ordinaryRead = Path.Combine(_tempDir, "real-read");
+        var outside = Path.Combine(_tempDir, "outside-root");
+        var alias = Path.Combine(_tempDir, "linked-root");
+        Directory.CreateDirectory(ordinaryRead);
+        Directory.CreateDirectory(outside);
+        Directory.CreateDirectory(Path.Combine(outside, "nested"));
+        Directory.CreateSymbolicLink(alias, outside);
+
+        // A caller may appear to authorize _tempDir/linked-root but the
+        // underlying files are actually outside that lexical subtree.
+        Assert.Throws<ArgumentException>(() => new McpPathPolicy([alias], []));
+        Assert.Throws<ArgumentException>(() =>
+            new McpPathPolicy([Path.Combine(alias, "nested")], []));
+        Assert.Throws<ArgumentException>(() => new McpPathPolicy([ordinaryRead], [alias]));
+
+        // The same real folder, authorized directly, is valid.
+        new McpPathPolicy([outside], [ordinaryRead]).RequireRead(
+            Path.Combine(outside, "nested", "movie.srt"));
+    }
+
+    [Fact]
     public void PathPolicy_DeniesTraversalAndUnapprovedWrites()
     {
         var root = Path.Combine(_tempDir, "approved");
