@@ -209,10 +209,11 @@ internal sealed class SubtitleTools
         [Description("FixCommonErrors rule selection: comma-separated ids from list_fix_common_errors_rules, 'all', or 'all,-RuleId'. Implies the FixCommonErrors operation.")] string? fixCommonErrorsRules = null,
         [Description("Force the language used by FixCommonErrors' language-gated rules (two-letter code such as 'en' or 'es'). Default: auto-detect from the text.")] string? fixCommonErrorsLanguage = null,
         [Description("RemoveFormatting rule selection: comma-separated ids from list_remove_formatting_rules, or 'all,-RuleId'. Implies the RemoveFormatting operation.")] string? removeFormattingRules = null,
-        [Description("Container inputs: subtitle track numbers to extract. Default: every text track.")] int[]? trackNumbers = null,
+        [Description("Container inputs: subtitle track numbers to extract. Default: every supported subtitle track, including image-based tracks that may require OCR.")] int[]? trackNumbers = null,
         [Description("Image-based inputs: keep only the time codes and skip OCR (text is left empty).")] bool timeCodesOnly = false,
         [Description("OCR engine for image-based inputs: tesseract (default), nocr, binaryocr, ollama, paddle or llamacpp.")] string? ocrEngine = null,
         [Description("OCR language for image-based inputs (Tesseract ISO 639-2 code such as 'eng').")] string? ocrLanguage = null,
+        [Description("OCR database file path. Required for ocrEngine 'nocr' (.nocr) and 'binaryocr' (.db) when OCR is enabled. Must be within an authorized read directory.")] string? ocrDb = null,
         [Description("Output resolution for image-based targets, e.g. '1920x1080'.")] string? resolution = null,
         CancellationToken cancellationToken = default)
         => RunAsync(async () =>
@@ -237,6 +238,28 @@ internal sealed class SubtitleTools
             // Validate every input and all possible output directories before any
             // loader, converter or write is invoked. Access denied by default.
             _pathPolicy?.RequireConversionPaths(normalizedInputs, outputFolder, outputFilename);
+
+            // Some OCR engines also open a separate training database file.
+            // Treat that file as an additional explicit read dependency.
+            var selectedOcrEngine = string.IsNullOrWhiteSpace(ocrEngine) ? "tesseract" : ocrEngine.Trim();
+            var needsOcrDb = !timeCodesOnly &&
+                (selectedOcrEngine.Equals("nocr", StringComparison.OrdinalIgnoreCase) ||
+                 selectedOcrEngine.Equals("binaryocr", StringComparison.OrdinalIgnoreCase));
+            if (needsOcrDb && string.IsNullOrWhiteSpace(ocrDb))
+            {
+                throw new McpException(
+                    "OCR engine 'nocr' requires a .nocr database and 'binaryocr' requires a .db database. " +
+                    "Pass ocrDb pointing to an authorized readable file.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(ocrDb))
+            {
+                _pathPolicy?.RequireRead(ocrDb);
+                if (!File.Exists(ocrDb))
+                {
+                    throw new McpException("OCR database file not found.");
+                }
+            }
 
             // Several image exporters create PNG/XML companions or output folders,
             // not just the validated destination. Until individual output artifacts
@@ -332,6 +355,7 @@ internal sealed class SubtitleTools
                 TimeCodesOnly = timeCodesOnly,
                 OcrEngine = string.IsNullOrWhiteSpace(ocrEngine) ? "tesseract" : ocrEngine,
                 OcrLanguage = string.IsNullOrWhiteSpace(ocrLanguage) ? "eng" : ocrLanguage,
+                OcrDb = string.IsNullOrWhiteSpace(ocrDb) ? null : ocrDb,
                 Resolution = string.IsNullOrWhiteSpace(resolution) ? null : ParseClientInput(() => ResolutionParser.Parse(resolution)),
                 // The converter narrates progress on stdout when not quiet; stdout is the MCP channel.
                 Quiet = true,
