@@ -1428,6 +1428,10 @@ internal record class ConversionOptions
     public string? OutputFilename { get; init; }
     // Internal MCP-only validation hook. Ordinary CLI conversions remain unchanged.
     public Action<string>? ValidateOutputPath { get; init; }
+    // MCP may authorize the descriptor but not the images it references.
+    // Keep this input restriction independent of output-path validation:
+    // a read-only caller should never rely on a write callback for safety.
+    public bool DenyReferencedImageInputs { get; init; }
     public string? Encoding { get; init; }
 
     /// <summary>
