@@ -40,6 +40,12 @@ internal sealed class McpPathPolicy
                 throw new ArgumentException("An authorized MCP directory does not exist.");
             }
 
+            // The per-request path check traverses *below* an authorized root.
+            // Without this check, --read-dir /safe/link (or /safe/link/child)
+            // can silently follow a symlink to a different directory, because
+            // Path.GetFullPath does not resolve filesystem links.
+            RejectLinkedRoot(root);
+
             if (!result.Any(r => r.Equals(root, PathComparison)))
             {
                 result.Add(root);
@@ -47,6 +53,31 @@ internal sealed class McpPathPolicy
         }
 
         return result.ToArray();
+    }
+
+    private static void RejectLinkedRoot(string root)
+    {
+        var volumeRoot = Path.GetPathRoot(root)
+            ?? throw new ArgumentException("Invalid MCP directory scope.");
+        var relative = Path.GetRelativePath(volumeRoot, root);
+        var current = volumeRoot;
+
+        foreach (var component in relative.Split(
+                     [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                     StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (component == ".")
+            {
+                continue;
+            }
+
+            current = Path.Combine(current, component);
+            if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+            {
+                throw new ArgumentException(
+                    "An authorized MCP directory cannot traverse a symbolic link or reparse point.");
+            }
+        }
     }
 
     internal void RequireRead(string path) => RequirePath(path, _readRoots);
