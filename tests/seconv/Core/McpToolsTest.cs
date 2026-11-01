@@ -280,6 +280,21 @@ public class McpToolsTest : IDisposable
         policy.RequireRead(bup);
         Assert.Throws<ModelContextProtocol.McpException>(() =>
             policy.RequireReadWithCompanions(bup));
+
+        // On a case-sensitive filesystem, the nominal uppercase .IFO path
+        // can be absent while the extractor locates a lower-case .ifo link.
+        File.Delete(ifo);
+        var lowercaseIfo = Path.Combine(root, "vts_01_0.ifo");
+        File.CreateSymbolicLink(lowercaseIfo, privateIfo);
+        Assert.False(File.Exists(ifo));
+        Assert.Throws<ModelContextProtocol.McpException>(() =>
+            policy.RequireReadWithCompanions(bup));
+
+        // This is also relevant when an uppercase .IFO input is used but
+        // the extractor picks a different, case-insensitively matched IFO.
+        File.WriteAllText(ifo, "safe IFO");
+        Assert.Throws<ModelContextProtocol.McpException>(() =>
+            policy.RequireReadWithCompanions(ifo));
     }
 
     [Fact]
