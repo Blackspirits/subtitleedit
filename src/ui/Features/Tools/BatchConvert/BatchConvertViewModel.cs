@@ -802,8 +802,8 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         Se.Settings.Tools.BatchConvert.AdjustDurationPercentage = AdjustPercent;
 
         Se.Settings.Tools.BatchConvert.AutoTranslateEngine = SelectedAutoTranslator.Name;
-        Se.Settings.Tools.BatchConvert.AutoTranslateSourceLanguage = SelectedSourceLanguage?.TwoLetterIsoLanguageName ?? "auto";
-        Se.Settings.Tools.BatchConvert.AutoTranslateTargetLanguage = SelectedTargetLanguage?.TwoLetterIsoLanguageName ?? "en";
+        Se.Settings.Tools.BatchConvert.AutoTranslateSourceLanguage = SelectedSourceLanguage?.Code ?? "auto";
+        Se.Settings.Tools.BatchConvert.AutoTranslateTargetLanguage = SelectedTargetLanguage?.Code ?? "en";
         Se.Settings.Tools.BatchConvert.AutoTranslateExtraTargetLanguages = string.Join(",", GetExtraTargetLanguages().Select(p => p.Code));
         Se.Settings.Tools.BatchConvert.LlamaCppUseRemoteServer = LlamaCppUseRemoteServer;
 
@@ -1028,7 +1028,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         }
 
         var batchEngine = Se.Settings.Tools.BatchConvert.AutoTranslateEngine;
-        var sourceLanguage = AutoTranslateViewModel.FindBatchConvertLanguage(SourceLanguages, Se.Settings.Tools.BatchConvert.AutoTranslateSourceLanguage, batchEngine);
+        var sourceLanguage = ResolveSavedBatchLanguage(SourceLanguages, Se.Settings.Tools.BatchConvert.AutoTranslateSourceLanguage, batchEngine);
         if (sourceLanguage != null)
         {
             SelectedSourceLanguage = sourceLanguage;
@@ -1040,7 +1040,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             Se.Settings.AutoTranslate.AutoTranslateLastTarget,
             Se.Language.CultureName,
             savedProviderName: Se.Settings.AutoTranslate.AutoTranslateLastName);
-        var targetLanguage = AutoTranslateViewModel.FindBatchConvertLanguage(TargetLanguages, Se.Settings.Tools.BatchConvert.AutoTranslateTargetLanguage, batchEngine);
+        var targetLanguage = ResolveSavedBatchLanguage(TargetLanguages, Se.Settings.Tools.BatchConvert.AutoTranslateTargetLanguage, batchEngine);
         if (targetLanguage != null)
         {
             SelectedTargetLanguage = targetLanguage;
@@ -4382,6 +4382,15 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         UpdateTargetLanguages(engine);
     }
 
+    // Persist full provider codes (e.g. zho_Hant); never select a random NLLB
+    // script when migrating older two-letter values such as "zh" or "ks".
+    internal static TranslationPair? ResolveSavedBatchLanguage(
+        IList<TranslationPair> languages, string? code, string? providerName)
+    {
+        return AutoTranslateViewModel.FindLanguage(languages,
+            AutoTranslateViewModel.NormalizeSavedLanguageCode(code, providerName));
+    }
+
     private void UpdateSourceLanguages(IAutoTranslator autoTranslator)
     {
         UpdateSourceLanguages(autoTranslator, SourceLanguages);
@@ -4415,7 +4424,8 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
 
         if (SelectedSourceLanguage == null && !string.IsNullOrEmpty(Se.Settings.AutoTranslate.AutoTranslateLastSource))
         {
-            var lang = SourceLanguages.FirstOrDefault(p => p.Code == Se.Settings.AutoTranslate.AutoTranslateLastSource);
+            var lang = ResolveSavedBatchLanguage(SourceLanguages,
+                Se.Settings.AutoTranslate.AutoTranslateLastSource, Se.Settings.AutoTranslate.AutoTranslateLastName);
             if (lang != null)
             {
                 SelectedSourceLanguage = lang;
