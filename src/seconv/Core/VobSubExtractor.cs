@@ -20,6 +20,29 @@ namespace SeConv.Core;
 /// </summary>
 internal static class VobSubExtractor
 {
+    // Both files in each pair are real outputs, even when the chosen stream is
+    // not the first. Keep this preflight separate so it can be regression-tested
+    // without requiring a large DVD fixture.
+    internal static void ValidateOutputPairs(
+        IReadOnlyList<string> paths, bool overwriteExisting, Action<string>? validateOutputPath = null)
+    {
+        foreach (var path in paths)
+        {
+            var idx = Path.ChangeExtension(path, ".idx");
+            validateOutputPath?.Invoke(path);
+            validateOutputPath?.Invoke(idx);
+            if (!overwriteExisting)
+            {
+                var existing = File.Exists(path) ? path : File.Exists(idx) ? idx : null;
+                if (existing is not null)
+                {
+                    throw new InvalidOperationException(
+                        $"Output file already exists: {existing}. Pass --overwrite to replace it.");
+                }
+            }
+        }
+    }
+
     /// <summary>One output produced by a successful extraction.</summary>
     public sealed record StreamOutput(string Path, int StreamId, int Written);
 
@@ -41,7 +64,8 @@ internal static class VobSubExtractor
     /// restarts are stitched from the NAV packs.
     /// </summary>
     public static ExtractionResult Extract(IReadOnlyList<string> vobFiles, string subOutputPath, int? dvdTitleNumber = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Action<string>? validateOutputPath = null, bool overwriteExisting = false)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (vobFiles.Count == 0)
@@ -108,6 +132,14 @@ internal static class VobSubExtractor
             .OrderBy(g => g.Key)
             .ToList();
 
+        // Preflight all output pairs before touching any stream's destination.
+        cancellationToken.ThrowIfCancellationRequested();
+        var outputPaths = Enumerable.Range(0, streams.Count)
+            .Select(i => streams.Count == 1 ? subOutputPath : InsertStreamIndex(subOutputPath, i))
+            .ToArray();
+        ValidateOutputPairs(outputPaths, overwriteExisting, validateOutputPath);
+        cancellationToken.ThrowIfCancellationRequested();
+
         var outputs = new List<StreamOutput>(streams.Count);
         for (var i = 0; i < streams.Count; i++)
         {
@@ -116,9 +148,7 @@ internal static class VobSubExtractor
             var streamPacks = streams[i].OrderBy(p => p.StartTime.Ticks).ToList();
             cancellationToken.ThrowIfCancellationRequested();
 
-            var outputPath = streams.Count == 1
-                ? subOutputPath
-                : InsertStreamIndex(subOutputPath, i);
+            var outputPath = outputPaths[i];
 
             var languageCode = ifo?.GetLanguageCode(streamId);
             var language = string.IsNullOrEmpty(languageCode) ? null : DvdSubtitleLanguage.GetLanguageOrNull(languageCode);
