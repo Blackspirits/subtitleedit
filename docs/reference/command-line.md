@@ -86,6 +86,7 @@ seconv dump-settings        # print a full --settings JSON with libse defaults (
 seconv info <file>          # print format/encoding/duration/language for a file
 seconv lint <pattern>       # validate subtitle(s); exit 1 if issues found
 seconv optimize-nocr <db>   # remove nOCR lines that don't tell characters apart (in place + .bak, or --output:<path>)
+seconv mcp --read-dir /subs --write-dir /output  # MCP stdio, explicit path permissions
 seconv --help               # show help (same text as -h, /? and /help)
 seconv --help-json          # print the whole command-line schema as JSON
 seconv --version            # print version and exit
@@ -93,7 +94,7 @@ seconv --version            # print version and exit
 
 ### Machine-readable output
 
-Every subcommand above accepts `--json`, and so does a conversion run. Scripts and agents should prefer it: the tables are hundreds of box-drawing lines, while the JSON gives you the exact tokens each option accepts.
+Every ordinary CLI subcommand above except `mcp` accepts `--json`, and so does a conversion run. `mcp` reserves stdout for JSON-RPC frames. Scripts and agents should prefer it: the tables are hundreds of box-drawing lines, while the JSON gives you the exact tokens each option accepts.
 
 ```bash
 seconv formats --json | jq -r '.formats[] | select(.inputOnly | not) | .id'
@@ -125,6 +126,60 @@ seconv info movie.srt --json         # machine-parseable
 seconv lint *.srt                    # check overlaps, line lengths, tags, ...
 seconv lint *.srt --json             # CI-friendly: exit 1 on any issue
 ```
+
+### MCP server
+
+
+`seconv mcp` exposes the engine as a [Model Context Protocol](https://modelcontextprotocol.io) server over stdio.
+Register it as a local stdio server in an MCP-capable client:
+
+```json
+{ "mcpServers": { "seconv": { "command": "seconv", "args": ["mcp", "--read-dir", "/home/user/subtitles", "--write-dir", "/home/user/subtitles/output"] } } }
+```
+
+The server exposes:
+
+| Tool | What it does |
+|---|---|
+| `list_formats` | Lists engine formats, including `mcpOutputSupported` for outputs allowed through the scoped MCP adapter. Optional substring filter. |
+| `subtitle_info` | Detects format, encoding, paragraph count, time range, duration and language. |
+| `read_subtitle` | Reads paged subtitle paragraphs from supported text or binary formats. |
+| `lint_subtitle` | Runs the same subtitle validation rules as `seconv lint`. |
+| `convert_subtitle` | Converts local subtitle inputs with a subset of CLI controls (format/output, encoding, timing, track selection, OCR and cleanup). Multi-file image outputs and advanced translation/image-style/custom-format/settings controls remain CLI-only. |
+| `list_fix_common_errors_rules` | Lists rule ids accepted by `fixCommonErrorsRules`. |
+| `list_remove_formatting_rules` | Lists rule ids accepted by `removeFormattingRules`. |
+
+The six inspection/list tools are advertised read-only and non-destructive. `convert_subtitle` is explicitly
+advertised as write-capable and destructive-capable because `overwrite=true` may replace an existing output file.
+All tools are closed-world local-file operations. Client cancellation is propagated cooperatively into conversion;
+legacy synchronous/native stages that do not accept a cancellation token are stopped at the surrounding checkpoints.
+
+The MCP server **denies filesystem access by default**. Specify at least one existing
+`--read-dir <directory>` to start the server. Add `--write-dir <directory>` only for
+folders where converted files may be created or replaced; without it,
+`convert_subtitle` cannot write outputs. Both flags may be repeated. Source
+paths and input globs must remain inside readable directories, and the actual
+output directory/filename must remain inside writable directories. Parent
+traversal and symbolic-link escapes are rejected, including symlinked or
+junction-backed approved roots and their ancestor directories.
+An output placed next to an input also requires write access to that folder.
+
+**This is a path allow-list, not an operating-system filesystem sandbox.**
+Known VobSub `.sub`/`.idx` and DVD `.IFO`/`.VOB` companions are checked,
+and resolved output destinations (including collision suffixes) are validated before writes.
+Image formats that generate additional PNG/XML sidecar files or output folders are
+blocked by MCP until those secondary destinations can be individually checked.
+Image-list inputs (e.g. BDN XML, SON, DOST or SRT with PNG references) are also blocked through MCP because those referenced files are not separately authorized. The regular CLI remains available for these formats. Explicit VobSub output filenames must end with `.sub` to ensure validation of their `.idx` companions.
+There is still a possible check/use race for filesystem objects that another
+process can mutate, and other format loaders may inspect additional companion files.
+Run the server with least-privilege OS permissions and use your MCP client's
+tool-approval and sandbox policies. Do not approve sensitive home directories
+or entire drives unless access is genuinely intended.
+
+A failed or cancelled multi-file call can have completed earlier output files before the later failure or cancellation. Inspect the returned per-file conversion data and existing outputs before retrying; a tool error is not a transaction rollback.
+
+Stdout is reserved exclusively for MCP JSON-RPC traffic. Logs and diagnostics go to stderr; start the server with
+`seconv mcp --read-dir /subs --verbose` for debug logging.
 
 ## Options
 
