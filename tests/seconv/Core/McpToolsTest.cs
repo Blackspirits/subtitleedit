@@ -742,6 +742,70 @@ public class McpToolsTest : IDisposable
     }
 
     [Fact]
+    public async Task StdioServer_CommaSeparatedInputCannotEscapeReadScopeThroughLeadingWhitespace()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            // An embedded second C:\\ drive prefix is not a valid Windows file
+            // component; this Unix test exercises the legacy comma-splitting bug.
+            return;
+        }
+
+        var allowed = Path.Combine(_tempDir, "approved-read");
+        var outside = Path.Combine(_tempDir, "private");
+        var output = Path.Combine(_tempDir, "approved-write");
+        Directory.CreateDirectory(allowed);
+        Directory.CreateDirectory(outside);
+        Directory.CreateDirectory(output);
+
+        var secret = Path.Combine(outside, "secret.srt");
+        File.WriteAllText(secret, "1\n00:00:01,000 --> 00:00:02,000\nUNAUTHORIZED SUBTITLE\n");
+
+        // Validating the trimmed value alone approves a missing path lexically
+        // inside 'allowed'; the legacy CLI used to split the untrimmed entry
+        // into two absolute paths, including the real, unapproved secret.
+        var crafted = " " + Path.Combine(allowed, "missing.srt,") + secret;
+        var scope = new McpPathPolicy([allowed], [output]);
+        scope.RequireConversionPaths([crafted], output, null);
+
+        var dll = Path.Combine(AppContext.BaseDirectory, "seconv.dll");
+        var transport = new StdioClientTransport(new StdioClientTransportOptions
+        {
+            Name = "seconv",
+            Command = "dotnet",
+            Arguments = [dll, "mcp", "--read-dir", allowed, "--write-dir", output],
+        });
+        var ct = TestContext.Current.CancellationToken;
+        await using var client = await McpClient.CreateAsync(transport, cancellationToken: ct);
+
+        var rejected = await client.CallToolAsync("convert_subtitle",
+            new Dictionary<string, object?>
+            {
+                ["inputs"] = new[] { crafted },
+                ["format"] = "WebVTT",
+                ["outputFolder"] = output,
+            }, cancellationToken: ct);
+
+        Assert.True(rejected.IsError);
+        Assert.Empty(Directory.GetFiles(output));
+
+        // Literal comma-named files remain supported after normalizing first.
+        var commaFile = Path.Combine(allowed, "my, name.srt");
+        File.WriteAllText(commaFile, "1\n00:00:01,000 --> 00:00:02,000\nAllowed text\n");
+        var valid = await client.CallToolAsync("convert_subtitle",
+            new Dictionary<string, object?>
+            {
+                ["inputs"] = new[] { " " + commaFile + " " },
+                ["format"] = "WebVTT",
+                ["outputFolder"] = output,
+            }, cancellationToken: ct);
+
+        Assert.True(Payload(valid).GetProperty("success").GetBoolean());
+        Assert.Contains("Allowed text", File.ReadAllText(Path.Combine(output, "my, name.vtt")));
+        Assert.DoesNotContain("UNAUTHORIZED SUBTITLE", File.ReadAllText(Path.Combine(output, "my, name.vtt")));
+    }
+
+    [Fact]
     public async Task StdioServer_ListsToolsWithSafeAnnotationsAndAnswersCalls()
     {
         var dll = Path.Combine(AppContext.BaseDirectory, "seconv.dll");
