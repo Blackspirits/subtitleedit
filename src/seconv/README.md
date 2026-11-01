@@ -76,8 +76,8 @@ The server provides `list_formats`, `subtitle_info`, `read_subtitle`,
 and `list_remove_formatting_rules`. The conversion tool can modify files.
 The MCP server **requires an explicit `--read-dir`** and allows writes only
 under `--write-dir`. Repeat either flag for additional folders. Paths outside
-these roots, directory traversal and symlink escapes below the roots are
-refused. If no write directory is approved, conversion cannot create outputs.
+these roots, directory traversal and symlink escapes are refused,
+including symlinked or junction-backed approved roots and their ancestors. If no write directory is approved, conversion cannot create outputs.
 Known VobSub `.sub`/`.idx` and DVD `.IFO`/`.VOB` companions are checked before reading,
 and resolved output paths are checked before writing. Image targets that produce
 additional PNG/XML files are unavailable through MCP until their individual paths
