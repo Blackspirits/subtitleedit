@@ -354,8 +354,10 @@ public class McpToolsTest : IDisposable
         }
     }
 
-    [Fact]
-    public async Task McpConversion_RejectsImageListReferencesBeforeLoadingImages()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task McpConversion_RejectsImageListReferencesBeforeLoadingImages(bool validateOutput)
     {
         var read = Path.Combine(_tempDir, "image-list-input");
         var write = Path.Combine(_tempDir, "image-list-output");
@@ -372,7 +374,8 @@ public class McpToolsTest : IDisposable
             Patterns = [input],
             Format = "WebVTT",
             OutputFolder = write,
-            ValidateOutputPath = policy.RequireWrite,
+            ValidateOutputPath = validateOutput ? policy.RequireWrite : null,
+            DenyReferencedImageInputs = true,
             Quiet = true,
         };
 
