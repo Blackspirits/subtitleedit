@@ -160,7 +160,8 @@ folders where converted files may be created or replaced; without it,
 `convert_subtitle` cannot write outputs. Both flags may be repeated. Source
 paths and input globs must remain inside readable directories, and the actual
 output directory/filename must remain inside writable directories. Parent
-traversal and symbolic-link escapes below approved roots are rejected.
+traversal and symbolic-link escapes are rejected, including symlinked or
+junction-backed approved roots and their ancestor directories.
 An output placed next to an input also requires write access to that folder.
 
 **This is a path allow-list, not an operating-system filesystem sandbox.**
