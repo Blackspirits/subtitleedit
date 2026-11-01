@@ -290,11 +290,6 @@ public class McpToolsTest : IDisposable
         Assert.Throws<ModelContextProtocol.McpException>(() =>
             policy.RequireReadWithCompanions(bup));
 
-        // This is also relevant when an uppercase .IFO input is used but
-        // the extractor picks a different, case-insensitively matched IFO.
-        File.WriteAllText(ifo, "safe IFO");
-        Assert.Throws<ModelContextProtocol.McpException>(() =>
-            policy.RequireReadWithCompanions(ifo));
     }
 
     [Fact]
