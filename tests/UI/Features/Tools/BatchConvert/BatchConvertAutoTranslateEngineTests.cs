@@ -104,6 +104,91 @@ public class BatchConvertAutoTranslateEngineTests
         Assert.Equal("gemma-3-12b", viewModel.AutoTranslateModel);
     }
 
+    [Theory]
+    [InlineData("zho_Hans")]
+    [InlineData("zho_Hant")]
+    [InlineData("eng_Latn")]
+    [InlineData("por_Latn")]
+    public void SavedNllbCode_RestoresTheExactLanguage(string code)
+    {
+        var languages = new NoLanguageLeftBehindServe().GetSupportedTargetLanguages();
+        var result = BatchConvertViewModel.ResolveSavedBatchLanguage(
+            languages, code, NoLanguageLeftBehindServe.StaticName);
+        Assert.NotNull(result);
+        Assert.Equal(code, result.Code);
+    }
+
+    [Theory]
+    [InlineData("zh")]
+    [InlineData("ks")]
+    public void LegacyAmbiguousIso_DoesNotSelectAnArbitraryNllbScript(string code)
+    {
+        var languages = new NoLanguageLeftBehindServe().GetSupportedTargetLanguages();
+        Assert.Null(BatchConvertViewModel.ResolveSavedBatchLanguage(
+            languages, code, NoLanguageLeftBehindServe.StaticName));
+    }
+
+    [AvaloniaFact]
+    public void SaveSettings_PreservesNllbSourceAndTargetScripts()
+    {
+        var batchSettings = Se.Settings.Tools.BatchConvert;
+        var oldEngine = batchSettings.AutoTranslateEngine;
+        var oldSource = batchSettings.AutoTranslateSourceLanguage;
+        var oldTarget = batchSettings.AutoTranslateTargetLanguage;
+        try
+        {
+            var vm = MakeViewModel();
+            vm.SelectedAutoTranslator = vm.AutoTranslators.Single(p => p is NoLanguageLeftBehindServe);
+            vm.OnAutoTranslatorChanged();
+            vm.SelectedSourceLanguage = vm.SourceLanguages.Single(p => p.Code == "eng_Latn");
+            vm.SelectedTargetLanguage = vm.TargetLanguages.Single(p => p.Code == "zho_Hant");
+
+            typeof(BatchConvertViewModel).GetMethod(
+                "SaveSettings", System.Reflection.BindingFlags.NonPublic |
+                                System.Reflection.BindingFlags.Instance)!.Invoke(vm, null);
+
+            Assert.Equal(NoLanguageLeftBehindServe.StaticName, batchSettings.AutoTranslateEngine);
+            Assert.Equal("eng_Latn", batchSettings.AutoTranslateSourceLanguage);
+            Assert.Equal("zho_Hant", batchSettings.AutoTranslateTargetLanguage);
+        }
+        finally
+        {
+            batchSettings.AutoTranslateEngine = oldEngine;
+            batchSettings.AutoTranslateSourceLanguage = oldSource;
+            batchSettings.AutoTranslateTargetLanguage = oldTarget;
+        }
+    }
+
+    [AvaloniaFact]
+    public void LoadSettings_RestoresTheSavedNllbTraditionalChineseVariant()
+    {
+        var batchSettings = Se.Settings.Tools.BatchConvert;
+        var oldEngine = batchSettings.AutoTranslateEngine;
+        var oldSource = batchSettings.AutoTranslateSourceLanguage;
+        var oldTarget = batchSettings.AutoTranslateTargetLanguage;
+        try
+        {
+            batchSettings.AutoTranslateEngine = NoLanguageLeftBehindServe.StaticName;
+            batchSettings.AutoTranslateSourceLanguage = "eng_Latn";
+            batchSettings.AutoTranslateTargetLanguage = "zho_Hant";
+
+            var vm = MakeViewModel();
+            typeof(BatchConvertViewModel).GetMethod(
+                "LoadSettings", System.Reflection.BindingFlags.NonPublic |
+                                System.Reflection.BindingFlags.Instance)!.Invoke(vm, null);
+
+            Assert.IsType<NoLanguageLeftBehindServe>(vm.SelectedAutoTranslator);
+            Assert.Equal("eng_Latn", vm.SelectedSourceLanguage?.Code);
+            Assert.Equal("zho_Hant", vm.SelectedTargetLanguage?.Code);
+        }
+        finally
+        {
+            batchSettings.AutoTranslateEngine = oldEngine;
+            batchSettings.AutoTranslateSourceLanguage = oldSource;
+            batchSettings.AutoTranslateTargetLanguage = oldTarget;
+        }
+    }
+
     private static BatchConvertViewModel MakeViewModel()
     {
         var services = new ServiceCollection();
