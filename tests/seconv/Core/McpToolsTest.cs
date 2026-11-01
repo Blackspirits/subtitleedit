@@ -637,6 +637,36 @@ public class McpToolsTest : IDisposable
         Assert.Empty(Directory.GetFiles(_tempDir));
     }
 
+    [Theory]
+    [InlineData("nocr")]
+    [InlineData("binaryocr")]
+    public async Task ConvertSubtitle_RequiresDatabaseForDatabaseBackedOcr(string engine)
+    {
+        var message = ErrorText(await SubtitleTools.ConvertSubtitle(
+            inputs: [Fixtures.Path("test.srt")],
+            format: "srt",
+            outputFolder: _tempDir,
+            ocrEngine: engine));
+
+        Assert.Contains("ocrDb", message);
+        Assert.Empty(Directory.GetFiles(_tempDir));
+    }
+
+    [Fact]
+    public async Task ConvertSubtitle_RejectsMissingOcrDatabaseBeforeConversion()
+    {
+        var db = Path.Combine(_tempDir, "missing.nocr");
+        var message = ErrorText(await SubtitleTools.ConvertSubtitle(
+            inputs: [Fixtures.Path("test.srt")],
+            format: "srt",
+            outputFolder: _tempDir,
+            ocrEngine: "nocr",
+            ocrDb: db));
+
+        Assert.Contains("not found", message);
+        Assert.Empty(Directory.GetFiles(_tempDir));
+    }
+
     [Fact]
     public async Task ConvertSubtitle_UnknownOperation_IsToolError()
     {
