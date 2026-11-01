@@ -217,7 +217,14 @@ internal sealed class SubtitleTools
         CancellationToken cancellationToken = default)
         => RunAsync(async () =>
         {
-            if (inputs is null || inputs.All(string.IsNullOrWhiteSpace))
+            // The CLI trims entries before resolving paths, but decides whether to
+            // split comma-delimited legacy inputs using the original string. Normalize
+            // once and use the *same* values for authorization and conversion; a
+            // leading space before an absolute comma-named path must not turn it into
+            // multiple paths (including an unapproved second absolute path).
+            var normalizedInputs = inputs?.Where(i => !string.IsNullOrWhiteSpace(i))
+                .Select(i => i.Trim()).ToArray() ?? [];
+            if (normalizedInputs.Length == 0)
             {
                 throw new McpException("At least one input path or pattern is required.");
             }
@@ -229,7 +236,7 @@ internal sealed class SubtitleTools
 
             // Validate every input and all possible output directories before any
             // loader, converter or write is invoked. Access denied by default.
-            _pathPolicy?.RequireConversionPaths(inputs, outputFolder, outputFilename);
+            _pathPolicy?.RequireConversionPaths(normalizedInputs, outputFolder, outputFilename);
 
             // Several image exporters create PNG/XML companions or output folders,
             // not just the validated destination. Until individual output artifacts
@@ -298,7 +305,7 @@ internal sealed class SubtitleTools
 
             var options = new ConversionOptions
             {
-                Patterns = inputs.Where(i => !string.IsNullOrWhiteSpace(i)).ToArray(),
+                Patterns = normalizedInputs,
                 Format = format,
                 OutputFolder = outputFolder,
                 OutputFilename = outputFilename,
