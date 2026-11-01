@@ -228,11 +228,12 @@ internal static class ContainerSubtitleLoader
         if (imageList != null)
         {
             // Image-list descriptors (BDN XML, SON, DOST, image-name SRT, ...)
-            // can contain arbitrary paths to pictures. The MCP path allow-list
-            // authorizes the descriptor, but not the files named inside it.
-            // Do not let its OCR loader open those unvalidated paths.
-            // The regular CLI does not install this MCP-only validation hook.
-            if (options.ValidateOutputPath is not null)
+            // can contain arbitrary paths to pictures. A caller may authorize
+            // the descriptor without authorizing the files it references.
+            // This explicit read-scope restriction is independent of output
+            // validation, so it cannot be disabled by omitting a write callback.
+            // The ordinary CLI leaves it off.
+            if (options.DenyReferencedImageInputs)
             {
                 throw new InvalidOperationException(
                     "Image-list inputs are not supported by MCP because their referenced image paths cannot be individually authorized. Use the seconv CLI in a restricted directory.");
