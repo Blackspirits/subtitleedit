@@ -227,6 +227,18 @@ internal static class ContainerSubtitleLoader
         var imageList = TryLoadImageList(filePath, ext);
         if (imageList != null)
         {
+            // Image-list descriptors (BDN XML, SON, DOST, image-name SRT, ...)
+            // can contain arbitrary paths to pictures. A caller may authorize
+            // the descriptor without authorizing the files it references.
+            // This explicit read-scope restriction is independent of output
+            // validation, so it cannot be disabled by omitting a write callback.
+            // The ordinary CLI leaves it off.
+            if (options.DenyReferencedImageInputs)
+            {
+                throw new InvalidOperationException(
+                    "Image-list inputs are not supported by MCP because their referenced image paths cannot be individually authorized. Use the seconv CLI in a restricted directory.");
+            }
+
             var subtitle = ImageOcrLoader.LoadImageList(imageList, filePath, options);
             if (subtitle.Paragraphs.Count == 0)
             {
@@ -1008,6 +1020,13 @@ internal static class ContainerSubtitleLoader
         {
             return string.Empty;
         }
-        return lang.RemoveChar('?').RemoveChar('!').RemoveChar('*').RemoveChar(',').RemoveChar('/').Trim();
+
+        // The container's language metadata is untrusted and also becomes an
+        // output-file suffix. Keep language subtags, but never allow path
+        // separators, Windows alternate-stream syntax or other filename
+        // metacharacters to escape the selected output directory.
+        return new string(lang.Trim()
+            .Where(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_')
+            .ToArray());
     }
 }
