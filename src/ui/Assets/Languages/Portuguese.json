@@ -2527,7 +2527,7 @@
       "saveNetflixQualityReport": "Guardar relatório de qualidade da Netflix",
       "netflixReportSaved": "Relatório de qualidade da Netflix guardado",
       "netFlixQualityReportSavedToX": "Relatório de qualidade da Netflix guardado em:\n{0}",
-      "dialogHyphenSpace": "Espaço após o travessão de diálogo",
+      "dialogHyphenSpace": "Espaçamento do hífen nos diálogos",
       "ellipsesNotThreeDots": "Utilizar reticências (não três pontos)",
       "onlyAllowedGlyphs": "Apenas glifos permitidos",
       "italics": "Itálico",
