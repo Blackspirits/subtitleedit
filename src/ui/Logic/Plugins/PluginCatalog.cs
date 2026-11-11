@@ -8,10 +8,13 @@ namespace Nikse.SubtitleEdit.Logic.Plugins;
 
 public class PluginCatalog : IPluginCatalog
 {
-    public IReadOnlyList<InstalledPlugin> GetPlugins()
+    public IReadOnlyList<InstalledPlugin> GetPlugins() => GetPluginsInFolder(Se.PluginsFolder);
+
+    // Tests use an isolated plugin folder; staging/backup folders must never be
+    // treated as installed plugins while an install/upgrade is in progress.
+    internal static IReadOnlyList<InstalledPlugin> GetPluginsInFolder(string root)
     {
         var result = new List<InstalledPlugin>();
-        var root = Se.PluginsFolder;
         if (!Directory.Exists(root))
         {
             return result;
@@ -19,6 +22,14 @@ public class PluginCatalog : IPluginCatalog
 
         foreach (var folder in Directory.EnumerateDirectories(root))
         {
+            var name = Path.GetFileName(folder);
+            if (name.Equals("Data", StringComparison.OrdinalIgnoreCase) ||
+                name.StartsWith(".tmp-", StringComparison.OrdinalIgnoreCase) ||
+                name.StartsWith(".bak-", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             var manifestPath = Path.Combine(folder, PluginConstants.ManifestFileName);
             if (!File.Exists(manifestPath))
             {
