@@ -7,7 +7,7 @@ on:
 
 jobs:
   windows:
-    name: windows (\${{ matrix.name }})
+    name: windows (${{ matrix.name }})
     runs-on: windows-latest
     strategy:
       fail-fast: false
