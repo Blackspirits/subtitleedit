@@ -20,7 +20,13 @@ internal static class AtomicFileWriter
         });
     }
 
-    public static void Write(string path, Action<Stream> write)
+    public static void Write(string path, Action<Stream> write) =>
+        Write(path, write, static tempPath =>
+            new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None));
+
+    // The injected factory lets tests simulate an unwritable directory without relying on
+    // platform-specific ACLs. A staging failure must never truncate the existing target.
+    internal static void Write(string path, Action<Stream> write, Func<string, FileStream> createTempFile)
     {
         var target = ResolveTarget(path);
         var directory = Path.GetDirectoryName(Path.GetFullPath(target));
@@ -31,18 +37,10 @@ internal static class AtomicFileWriter
 
         // Same folder, so the rename stays on one volume and is atomic.
         var tempPath = Path.Combine(directory, "." + Path.GetFileName(target) + "." + Path.GetRandomFileName() + ".tmp");
-        FileStream tempStream;
-        try
-        {
-            tempStream = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-        }
-        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
-        {
-            // The folder is not writable (the file may still be) - write in place as before.
-            using var fs = new FileStream(target, FileMode.Create, FileAccess.Write);
-            write(fs);
-            return;
-        }
+        // Fail closed when the temporary file cannot be created. Falling back to
+        // FileMode.Create on the target would truncate existing subtitles and lose them
+        // if serialization subsequently fails or the process is interrupted.
+        var tempStream = createTempFile(tempPath);
 
         try
         {
