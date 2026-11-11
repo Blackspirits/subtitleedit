@@ -94,6 +94,16 @@ internal static partial class EditorChrome
                 return UiTheme.MidnightCinemaBackgroundColor;
             }
 
+            if (appearance?.Theme == UiTheme.ThemeNameCatppuccinMocha)
+            {
+                return UiTheme.CatppuccinMochaBackgroundColor;
+            }
+
+            if (appearance?.Theme == UiTheme.ThemeNameDracula)
+            {
+                return UiTheme.DraculaBackgroundColor;
+            }
+
             return appearance != null && Color.TryParse(appearance.DarkModeBackgroundColor, out var dark)
                 ? Color.FromRgb(dark.R, dark.G, dark.B)
                 : DefaultDarkBase;
