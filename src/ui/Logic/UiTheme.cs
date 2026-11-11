@@ -26,6 +26,7 @@ public static class UiTheme
     private static IStyle? _themeOverrideStyle;
     private static IStyle? _layoutScaleMenuStyle;
     private static ResourceDictionary? _resourceOverrides;
+    private static ResourceDictionary? _popupAndScrollResources;
     private static object? _themeChangeSubscription;
 
     /// <summary>
@@ -219,6 +220,7 @@ public static class UiTheme
         EditorChrome.InvalidatePalette();
 
         ApplyFieldStyle();
+        ApplyPopupAndScrollColors();
         ApplyMenuScaleStyle(Se.Settings.Appearance.LayoutScale);
         ApplyTextSelectionStyle();
         ApplyProgressBarContrastStyle();
@@ -249,6 +251,7 @@ public static class UiTheme
 
         EditorChrome.InvalidatePalette();
         ApplyFieldStyle();
+        ApplyPopupAndScrollColors();
         ApplyTextSelectionStyle();
         ApplyProgressBarContrastStyle();
         SystemThemeChangedCallback?.Invoke();
@@ -760,6 +763,76 @@ public static class UiTheme
         }
 
         Application.Current.Styles.Add(_fieldStyle);
+    }
+
+    /// <summary>
+    /// Fluent has separate resources for the open ComboBox popup and for scrollbar tracks,
+    /// thumbs and arrows. Styling the closed ComboBox or ScrollViewer does not change them.
+    /// Use the same editor palette as the rest of the UI and refresh when the theme changes,
+    /// including System's light/dark transition.
+    /// </summary>
+    internal static void ApplyPopupAndScrollColors()
+    {
+        var app = Application.Current;
+        if (app == null)
+        {
+            return;
+        }
+
+        if (_popupAndScrollResources != null)
+        {
+            app.Resources.MergedDictionaries.Remove(_popupAndScrollResources);
+        }
+
+        var palette = EditorChrome.Palette;
+        var isDark = IsDarkThemeEnabled();
+        var popup = palette.Menu;
+        var hover = Blend(popup, palette.Accent, isDark ? 0.16 : 0.08);
+        var selected = Blend(popup, palette.Accent, isDark ? 0.38 : 0.18);
+        var selectedHover = Blend(popup, palette.Accent, isDark ? 0.48 : 0.25);
+        var thumb = Blend(palette.Panel, palette.StrongText, isDark ? 0.37 : 0.36);
+        var thumbHover = Blend(palette.Panel, palette.StrongText, isDark ? 0.55 : 0.53);
+        var thumbPressed = Blend(palette.Panel, palette.StrongText, isDark ? 0.67 : 0.65);
+
+        static SolidColorBrush Brush(Color color) => new(color);
+
+        _popupAndScrollResources = new ResourceDictionary
+        {
+            // The popup's Border uses dynamic resources, not ComboBox.Background.
+            ["ComboBoxDropDownBackground"] = Brush(popup),
+            ["ComboBoxDropDownBorderBrush"] = Brush(palette.MenuBorder),
+            ["ComboBoxItemBackground"] = Brush(popup),
+            ["ComboBoxItemForeground"] = Brush(palette.StrongText),
+            ["ComboBoxItemBackgroundPointerOver"] = Brush(hover),
+            ["ComboBoxItemForegroundPointerOver"] = Brush(palette.StrongText),
+            ["ComboBoxItemBackgroundPressed"] = Brush(selectedHover),
+            ["ComboBoxItemBackgroundSelected"] = Brush(selected),
+            ["ComboBoxItemForegroundSelected"] = Brush(palette.StrongText),
+            ["ComboBoxItemBackgroundSelectedPointerOver"] = Brush(selectedHover),
+            ["ComboBoxItemForegroundSelectedPointerOver"] = Brush(palette.StrongText),
+            ["ComboBoxItemBackgroundSelectedPressed"] = Brush(selectedHover),
+
+            // Fluent has distinct resources for the compact and expanded scrollbar.
+            ["ScrollBarBackground"] = Brush(palette.Panel),
+            ["ScrollBarBackgroundPointerOver"] = Brush(palette.Hover),
+            ["ScrollBarTrackFill"] = Brush(palette.Panel),
+            ["ScrollBarTrackFillPointerOver"] = Brush(palette.Hover),
+            ["ScrollBarTrackStroke"] = Brush(palette.Separator),
+            ["ScrollBarTrackStrokePointerOver"] = Brush(palette.Separator),
+            ["ScrollBarPanningThumbBackground"] = Brush(thumb),
+            ["ScrollBarThumbBackgroundColor"] = Brush(thumb),
+            ["ScrollBarThumbFillPointerOver"] = Brush(thumbHover),
+            ["ScrollBarThumbFillPressed"] = Brush(thumbPressed),
+            ["ScrollBarButtonBackground"] = Brush(palette.Panel),
+            ["ScrollBarButtonBackgroundPointerOver"] = Brush(palette.Hover),
+            ["ScrollBarButtonBackgroundPressed"] = Brush(palette.Pressed),
+            ["ScrollBarButtonBorderBrush"] = Brush(palette.Separator),
+            ["ScrollBarButtonBorderBrushPointerOver"] = Brush(palette.Separator),
+            ["ScrollBarButtonArrowForeground"] = Brush(palette.Icon),
+            ["ScrollBarButtonArrowForegroundPointerOver"] = Brush(palette.StrongText),
+        };
+
+        app.Resources.MergedDictionaries.Add(_popupAndScrollResources);
     }
 
     /// <summary>
