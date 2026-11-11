@@ -36,12 +36,14 @@ internal static class AtomicFileWriter
 
         // Same folder, so the rename stays on one volume and is atomic.
         var tempPath = Path.Combine(directory, "." + Path.GetFileName(target) + "." + Path.GetRandomFileName() + ".tmp");
+        // If temp creation fails, there is no file owned by this operation to clean.
+        // In particular, an IOException from FileMode.CreateNew may mean this random
+        // name already exists; deleting it in finally would remove somebody else's file.
+        // Never fall back to truncating the original destination.
+        var tempStream = createTempFile(tempPath);
         try
         {
-            // If the temporary file cannot be created, fail without modifying the
-            // destination. Writing directly would truncate existing subtitles before
-            // the caller can detect an error (e.g. disk or permission failure).
-            using (var tempStream = createTempFile(tempPath))
+            using (tempStream)
             {
                 write(tempStream);
                 tempStream.Flush(flushToDisk: true);
