@@ -37,7 +37,7 @@ public class PopupScrollbarThemeTests
             var palette = EditorChrome.Palette;
             Assert.Equal(palette.Menu, GetBrushColor("ComboBoxDropDownBackground"));
             Assert.Equal(palette.MenuBorder, GetBrushColor("ComboBoxDropDownBorderBrush"));
-            Assert.Equal(palette.Panel, GetBrushColor("ScrollBarBackground"));
+            Assert.Equal(Colors.Transparent, GetBrushColor("ScrollBarBackground"));
             Assert.Equal(palette.Panel, GetBrushColor("ScrollBarTrackFill"));
             Assert.Equal(palette.StrongText, GetBrushColor("ComboBoxItemForeground"));
             Assert.True(UiTheme.GetContrastRatio(
