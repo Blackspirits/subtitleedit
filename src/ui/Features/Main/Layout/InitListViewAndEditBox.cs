@@ -2815,14 +2815,12 @@ public static partial class InitListViewAndEditBox
     /// not something a user should configure.
     /// <para>
     /// The action buttons on the right must also fit when the splitter reaches its floor.
-    /// <para>
     /// The up/down column to the left counts too. Since the row became a fixed Pixel row
     /// (#14834) it no longer grows to the tallest column the way the old Auto row did, so a
     /// floor derived from the text column alone let three or four stacked up/downs (End time
     /// switched on, or the ASSA Layer control) run past the row and draw over whatever sits
     /// below the edit box. The column's own extent is read from its arranged children rather
     /// than its DesiredSize, which is clamped to the space the row offered.
-    /// </para>
     /// </para>
     /// </summary>
     private static void TrackEditSectionMinimumHeight(Grid mainGrid, Grid textEditGrid)
