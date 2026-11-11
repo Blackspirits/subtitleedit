@@ -167,6 +167,51 @@ public class EditorChromePaletteTests
         }
     }
 
+    [AvaloniaTheory]
+    [InlineData(UiTheme.ThemeNameCatppuccinMocha, "#1E1E2E", "#CDD6F4", "#CBA6F7")]
+    [InlineData(UiTheme.ThemeNameDracula, "#282A36", "#F8F8F2", "#BD93F9")]
+    public void AdditionalDarkThemes_KeepTheirPalettes_AndReuseDarkArt(
+        string theme, string backgroundHex, string foregroundHex, string accentHex)
+    {
+        var application = Application.Current!;
+        var appearance = Se.Settings.Appearance;
+        var oldVariant = application.RequestedThemeVariant;
+        var oldTheme = appearance.Theme;
+        var oldBackground = appearance.DarkModeBackgroundColor;
+        var oldForeground = appearance.DarkModeForegroundColor;
+        try
+        {
+            appearance.Theme = theme;
+            application.RequestedThemeVariant = ThemeVariant.Dark;
+            appearance.DarkModeBackgroundColor = "#FF000000";
+            appearance.DarkModeForegroundColor = "#FF000000";
+            EditorChrome.InvalidatePalette();
+
+            var background = Color.Parse(backgroundHex);
+            var foreground = Color.Parse(foregroundHex);
+            var accent = Color.Parse(accentHex);
+
+            Assert.True(UiTheme.IsDarkThemeEnabled());
+            Assert.Contains(theme, UiTheme.CycleThemeNames);
+            Assert.Equal(background, UiTheme.GetThemeBackgroundColor());
+            Assert.Equal(foreground, UiTheme.GetThemeForegroundColor());
+            Assert.Equal(background, Assert.IsAssignableFrom<ISolidColorBrush>(EditorChrome.WindowBrush).Color);
+            Assert.NotNull(UiTheme.GetThemeWaveformColors());
+            Assert.Equal(Path.Combine(Se.ThemesFolder, UiTheme.ThemeNameDark, UiTheme.VideoBackgroundFileName),
+                UiTheme.GetThemeArtPath(UiTheme.VideoBackgroundFileName));
+            Assert.Equal(accent.FromColorToHex(),
+                Nikse.SubtitleEdit.Logic.Plugins.PluginThemeColorsFactory.Build().AccentColor);
+        }
+        finally
+        {
+            appearance.Theme = oldTheme;
+            appearance.DarkModeBackgroundColor = oldBackground;
+            appearance.DarkModeForegroundColor = oldForeground;
+            application.RequestedThemeVariant = oldVariant;
+            EditorChrome.InvalidatePalette();
+        }
+    }
+
     [AvaloniaFact]
     public void PaletteBrushes_FollowTheLightThemeWindowColor()
     {
