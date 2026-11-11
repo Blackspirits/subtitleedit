@@ -99,6 +99,30 @@ public class AtomicFileWriterTest : IDisposable
     }
 
     [Fact]
+    public void Write_WhenTempCreationCollides_DoesNotDeleteThePreexistingTemp()
+    {
+        var target = Path.Combine(_folder, "subs.srt");
+        File.WriteAllText(target, "old content");
+        string? occupiedTemp = null;
+
+        FileStream SimulateCollision(string temp)
+        {
+            occupiedTemp = temp;
+            // Simulate a different process creating the chosen file before CreateNew.
+            File.WriteAllText(temp, "someone else's temporary content");
+            throw new IOException("CreateNew failed: file already exists.");
+        }
+
+        Assert.Throws<IOException>(() => AtomicFileWriter.Write(
+            target, _ => throw new InvalidOperationException("Should not write"),
+            SimulateCollision));
+
+        Assert.NotNull(occupiedTemp);
+        Assert.Equal("old content", File.ReadAllText(target));
+        Assert.Equal("someone else's temporary content", File.ReadAllText(occupiedTemp));
+    }
+
+    [Fact]
     public void WriteAllText_ReplacesContentAndWritesPreamble()
     {
         var path = Path.Combine(_folder, "subs.srt");
