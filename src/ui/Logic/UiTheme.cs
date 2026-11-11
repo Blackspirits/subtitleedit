@@ -813,8 +813,10 @@ public static class UiTheme
             ["ComboBoxItemBackgroundSelectedPressed"] = Brush(selectedHover),
 
             // Fluent has distinct resources for the compact and expanded scrollbar.
-            ["ScrollBarBackground"] = Brush(palette.Panel),
-            ["ScrollBarBackgroundPointerOver"] = Brush(palette.Hover),
+            // Leave the outer scrollbar transparent for macOS overlay/auto-hide behavior;
+            // the actual track is themed below.
+            ["ScrollBarBackground"] = Brushes.Transparent,
+            ["ScrollBarBackgroundPointerOver"] = Brushes.Transparent,
             ["ScrollBarTrackFill"] = Brush(palette.Panel),
             ["ScrollBarTrackFillPointerOver"] = Brush(palette.Hover),
             ["ScrollBarTrackStroke"] = Brush(palette.Separator),
