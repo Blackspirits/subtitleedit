@@ -39,6 +39,7 @@ public static partial class InitListViewAndEditBox
 
     /// <summary>Name of the up/down column of the edit section, so the height tracker can find it.</summary>
     internal const string TimeControlsPanelName = "SubtitleTimeControlsPanel";
+    internal const string EditBoxButtonPanelName = "SubtitleEditBoxButtonPanel";
     // The subtitle grid row is Star, so without a floor the splitter can drag it away to
     // nothing and there is no handle left to drag back (#10271).
     private const double SubtitleGridMinimumHeight = 45;
@@ -2203,6 +2204,7 @@ public static partial class InitListViewAndEditBox
 
         var buttonPanel = new StackPanel
         {
+            Name = EditBoxButtonPanelName,
             Orientation = Orientation.Vertical,
             Spacing = 3,
             Margin = new Thickness(6,3,3,3)
@@ -2812,6 +2814,7 @@ public static partial class InitListViewAndEditBox
     /// over the labels (#10271). Measured rather than stored: this is a derived layout fact,
     /// not something a user should configure.
     /// <para>
+    /// The action buttons on the right must also fit when the splitter reaches its floor.
     /// The up/down column to the left counts too. Since the row became a fixed Pixel row
     /// (#14834) it no longer grows to the tallest column the way the old Auto row did, so a
     /// floor derived from the text column alone let three or four stacked up/downs (End time
@@ -2825,6 +2828,8 @@ public static partial class InitListViewAndEditBox
         var timeControlsPanel = (textEditGrid.Parent as Grid)?.Children
             .OfType<StackPanel>()
             .FirstOrDefault(p => p.Name == TimeControlsPanelName);
+        var buttonPanel = textEditGrid.Children.OfType<StackPanel>()
+            .FirstOrDefault(p => p.Name == EditBoxButtonPanelName);
 
         textEditGrid.LayoutUpdated += (_, _) =>
         {
@@ -2841,6 +2846,12 @@ public static partial class InitListViewAndEditBox
             }
 
             var needed = SubtitleTextBoxMinimumHeight + labelRows + EditGridMargin * 2;
+            var buttonsNeeded = GetEditBoxButtonsMinimumHeight(buttonPanel);
+            if (buttonsNeeded > 0)
+            {
+                needed = Math.Max(needed, buttonsNeeded + labelRows + EditGridMargin * 2);
+            }
+
             var timeControlsNeeded = GetTimeControlsMinimumHeight(timeControlsPanel);
             if (timeControlsNeeded > needed)
             {
@@ -2873,6 +2884,25 @@ public static partial class InitListViewAndEditBox
     /// content extent even when the row it was arranged in is shorter) plus the panel's
     /// margin and the section margin. Zero when nothing is laid out yet.
     /// </summary>
+    private static double GetEditBoxButtonsMinimumHeight(StackPanel? buttonPanel)
+    {
+        if (buttonPanel == null)
+        {
+            return 0;
+        }
+
+        var bottom = 0.0;
+        foreach (var child in buttonPanel.Children)
+        {
+            if (child.IsVisible && child.Bounds.Bottom > bottom)
+            {
+                bottom = child.Bounds.Bottom;
+            }
+        }
+
+        return bottom <= 0 ? 0 : bottom + buttonPanel.Margin.Top + buttonPanel.Margin.Bottom;
+    }
+
     private static double GetTimeControlsMinimumHeight(StackPanel? timeControlsPanel)
     {
         if (timeControlsPanel == null)
