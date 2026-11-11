@@ -1,5 +1,10 @@
 using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
+using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
+using Avalonia.Threading;
+using Avalonia.VisualTree;
 using Avalonia.Media;
 using Avalonia.Styling;
 using Nikse.SubtitleEdit.Logic;
@@ -46,6 +51,48 @@ public class PopupScrollbarThemeTests
         }
         finally
         {
+            appearance.Theme = oldTheme;
+            app.RequestedThemeVariant = oldVariant;
+            EditorChrome.InvalidatePalette();
+            UiTheme.ApplyPopupAndScrollColors();
+        }
+    }
+
+    [AvaloniaTheory]
+    [InlineData(UiTheme.ThemeNameNord, true)]
+    [InlineData(UiTheme.ThemeNamePastel, false)]
+    public void OpenComboBoxPopup_UsesTheActiveThemeBackground(string theme, bool dark)
+    {
+        var app = Application.Current!;
+        var appearance = Se.Settings.Appearance;
+        var oldTheme = appearance.Theme;
+        var oldVariant = app.RequestedThemeVariant;
+        Window? window = null;
+        try
+        {
+            appearance.Theme = theme;
+            app.RequestedThemeVariant = dark ? ThemeVariant.Dark : ThemeVariant.Light;
+            EditorChrome.InvalidatePalette();
+            UiTheme.ApplyPopupAndScrollColors();
+
+            var combo = new ComboBox { ItemsSource = Enumerable.Range(0, 40).Select(x => x.ToString()).ToArray() };
+            window = new Window { Content = combo, Width = 320, Height = 320 };
+            window.Show();
+            window.UpdateLayout();
+            combo.IsDropDownOpen = true;
+            AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+            Dispatcher.UIThread.RunJobs();
+
+            var popup = Assert.Single(combo.GetVisualDescendants().OfType<Popup>());
+            var popupBorder = Assert.IsType<Border>(popup.Child);
+            Assert.Equal(EditorChrome.Palette.Menu,
+                Assert.IsAssignableFrom<ISolidColorBrush>(popupBorder.Background).Color);
+            Assert.Equal(EditorChrome.Palette.MenuBorder,
+                Assert.IsAssignableFrom<ISolidColorBrush>(popupBorder.BorderBrush).Color);
+        }
+        finally
+        {
+            window?.Close();
             appearance.Theme = oldTheme;
             app.RequestedThemeVariant = oldVariant;
             EditorChrome.InvalidatePalette();
