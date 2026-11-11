@@ -42,6 +42,62 @@ public class AtomicFileWriterTest : IDisposable
         Assert.Equal(new[] { path }, Directory.GetFiles(_folder));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Write_WhenTempFileCreationFails_KeepsOriginalAndDoesNotInvokeWriter(bool accessDenied)
+    {
+        var path = Path.Combine(_folder, "subs.srt");
+        File.WriteAllText(path, "existing subtitles");
+        var writerCalled = false;
+
+        FileStream FailCreatingTempFile(string _)
+        {
+            if (accessDenied)
+            {
+                throw new UnauthorizedAccessException("Simulated read-only directory.");
+            }
+
+            throw new IOException("Simulated failure creating the temporary file.");
+        }
+
+        var error = Record.Exception(() => AtomicFileWriter.Write(
+            path,
+            stream =>
+            {
+                writerCalled = true;
+                stream.Write("new"u8);
+            },
+            FailCreatingTempFile));
+
+        if (accessDenied)
+        {
+            Assert.IsType<UnauthorizedAccessException>(error);
+        }
+        else
+        {
+            Assert.IsType<IOException>(error);
+        }
+
+        Assert.False(writerCalled);
+        Assert.Equal("existing subtitles", File.ReadAllText(path));
+        Assert.Equal(new[] { path }, Directory.GetFiles(_folder));
+    }
+
+    [Fact]
+    public void Write_WhenTempFileCreationFails_DoesNotCreateNewOutputFile()
+    {
+        var path = Path.Combine(_folder, "new-file.srt");
+
+        Assert.Throws<IOException>(() => AtomicFileWriter.Write(
+            path,
+            _ => throw new InvalidOperationException("Should not be called"),
+            _ => throw new IOException("Cannot create a temporary file.")));
+
+        Assert.False(File.Exists(path));
+        Assert.Empty(Directory.GetFiles(_folder));
+    }
+
     [Fact]
     public void WriteAllText_ReplacesContentAndWritesPreamble()
     {
