@@ -13,6 +13,10 @@ namespace Nikse.SubtitleEdit.Logic.Plugins;
 
 public class PluginDownloadService : IPluginDownloadService
 {
+    // Serialize the short publish phase (not the download) across concurrent installs.
+    // The catalog lookup must be part of the same critical section as the replacement.
+    private static readonly object PublicationLock = new();
+
     private readonly HttpClient _httpClient;
     private readonly IZipUnpacker _zipUnpacker;
     private readonly IPluginCatalog _pluginCatalog;
@@ -75,11 +79,15 @@ public class PluginDownloadService : IPluginDownloadService
                 }
 
                 // The catalog deliberately ignores .tmp- staging folders.
-                // Validate the incoming plugin before moving the installed version.
-                var existing = _pluginCatalog.GetPlugins()
-                    .FirstOrDefault(p => p.Manifest.Name.Equals(entry.Name, StringComparison.OrdinalIgnoreCase));
-                PublishPreparedPlugin(Se.PluginsFolder, source, targetName, existing?.FolderPath,
-                    entry.Name, cancellationToken);
+                // Lookup and replacement must be serialized so two simultaneous
+                // installs cannot race through the same previous plugin folder.
+                lock (PublicationLock)
+                {
+                    var existing = _pluginCatalog.GetPlugins()
+                        .FirstOrDefault(p => p.Manifest.Name.Equals(entry.Name, StringComparison.OrdinalIgnoreCase));
+                    PublishPreparedPlugin(Se.PluginsFolder, source, targetName, existing?.FolderPath,
+                        entry.Name, cancellationToken);
+                }
             }, cancellationToken);
         }
         finally
