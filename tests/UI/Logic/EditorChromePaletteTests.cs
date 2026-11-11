@@ -168,12 +168,10 @@ public class EditorChromePaletteTests
     }
 
     [AvaloniaTheory]
-    [InlineData(UiTheme.ThemeNameCatppuccinMocha, 0x1E, 0x1E, 0x2E, 0xCD, 0xD6, 0xF4, 0xCB, 0xA6, 0xF7)]
-    [InlineData(UiTheme.ThemeNameDracula, 0x28, 0x2A, 0x36, 0xF8, 0xF8, 0xF2, 0xBD, 0x93, 0xF9)]
+    [InlineData(UiTheme.ThemeNameCatppuccinMocha, "#1E1E2E", "#CDD6F4", "#CBA6F7")]
+    [InlineData(UiTheme.ThemeNameDracula, "#282A36", "#F8F8F2", "#BD93F9")]
     public void AdditionalDarkThemes_KeepTheirPalettes_AndReuseDarkArt(
-        string theme, byte bgR, byte bgG, byte bgB,
-        byte fgR, byte fgG, byte fgB,
-        byte accentR, byte accentG, byte accentB)
+        string theme, string backgroundHex, string foregroundHex, string accentHex)
     {
         var application = Application.Current!;
         var appearance = Se.Settings.Appearance;
@@ -189,9 +187,9 @@ public class EditorChromePaletteTests
             appearance.DarkModeForegroundColor = "#FF000000";
             EditorChrome.InvalidatePalette();
 
-            var background = Color.FromRgb(bgR, bgG, bgB);
-            var foreground = Color.FromRgb(fgR, fgG, fgB);
-            var accent = Color.FromRgb(accentR, accentG, accentB);
+            var background = Color.Parse(backgroundHex);
+            var foreground = Color.Parse(foregroundHex);
+            var accent = Color.Parse(accentHex);
 
             Assert.True(UiTheme.IsDarkThemeEnabled());
             Assert.Contains(theme, UiTheme.CycleThemeNames);
