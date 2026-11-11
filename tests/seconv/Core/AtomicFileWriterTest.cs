@@ -42,6 +42,48 @@ public class AtomicFileWriterTest : IDisposable
         Assert.Equal(new[] { path }, Directory.GetFiles(_folder));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Write_TempFileCreationFailure_PreservesExistingFile(bool permissionDenied)
+    {
+        var path = Path.Combine(_folder, "subs.srt");
+        File.WriteAllText(path, "original subtitle content");
+        var writerCalled = false;
+
+        // Simulate a filesystem that permits reading the target but cannot create
+        // a same-directory staging file. The unsafe fallback would truncate the target.
+        Exception CreateFailure(string _) =>
+            permissionDenied
+                ? new UnauthorizedAccessException("Read-only directory")
+                : new IOException("No space for staging file");
+
+        if (permissionDenied)
+        {
+            Assert.Throws<UnauthorizedAccessException>(() =>
+                AtomicFileWriter.Write(path, stream =>
+                {
+                    writerCalled = true;
+                    stream.Write("partial"u8);
+                    throw new InvalidOperationException("Failed serializing");
+                }, _ => throw CreateFailure(_)));
+        }
+        else
+        {
+            Assert.Throws<IOException>(() =>
+                AtomicFileWriter.Write(path, stream =>
+                {
+                    writerCalled = true;
+                    stream.Write("partial"u8);
+                    throw new InvalidOperationException("Failed serializing");
+                }, _ => throw CreateFailure(_)));
+        }
+
+        Assert.False(writerCalled);
+        Assert.Equal("original subtitle content", File.ReadAllText(path));
+        Assert.Equal(new[] { path }, Directory.GetFiles(_folder));
+    }
+
     [Fact]
     public void WriteAllText_ReplacesContentAndWritesPreamble()
     {
