@@ -571,7 +571,7 @@ public partial class SettingsViewModel : ObservableObject
         ];
         SelectedUpdateChannel = UpdateChannels[0];
 
-        Themes = [Se.Language.General.System, Se.Language.General.Light, Se.Language.General.Dark, Se.Language.General.Classic, "Pastel", "Nord", "Midnight Cinema", "Sakura"];
+        Themes = [Se.Language.General.System, Se.Language.General.Light, Se.Language.General.Dark, Se.Language.General.Classic, "Pastel", "Nord", "Midnight Cinema", "Sakura", "Catppuccin Mocha", "Dracula"];
         SelectedTheme = Themes[0];
 
         // Themes.zip is unpacked into the data folder at start-up; if that failed (or has not run)
@@ -1549,6 +1549,14 @@ public partial class SettingsViewModel : ObservableObject
         {
             return UiTheme.ThemeNameSakura;
         }
+        else if (translation == "Catppuccin Mocha")
+        {
+            return UiTheme.ThemeNameCatppuccinMocha;
+        }
+        else if (translation == "Dracula")
+        {
+            return UiTheme.ThemeNameDracula;
+        }
         else
         {
             return UiTheme.ThemeNameSystem;
@@ -1588,6 +1596,14 @@ public partial class SettingsViewModel : ObservableObject
         else if (theme == UiTheme.ThemeNameSakura)
         {
             return "Sakura";
+        }
+        else if (theme == UiTheme.ThemeNameCatppuccinMocha)
+        {
+            return "Catppuccin Mocha";
+        }
+        else if (theme == UiTheme.ThemeNameDracula)
+        {
+            return "Dracula";
         }
         else
         {
