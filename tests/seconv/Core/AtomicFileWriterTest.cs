@@ -42,6 +42,86 @@ public class AtomicFileWriterTest : IDisposable
         Assert.Equal(new[] { path }, Directory.GetFiles(_folder));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Write_WhenTempFileCreationFails_KeepsOriginalAndDoesNotInvokeWriter(bool accessDenied)
+    {
+        var path = Path.Combine(_folder, "subs.srt");
+        File.WriteAllText(path, "existing subtitles");
+        var writerCalled = false;
+
+        FileStream FailCreatingTempFile(string _)
+        {
+            if (accessDenied)
+            {
+                throw new UnauthorizedAccessException("Simulated read-only directory.");
+            }
+
+            throw new IOException("Simulated failure creating the temporary file.");
+        }
+
+        var error = Record.Exception(() => AtomicFileWriter.Write(
+            path,
+            stream =>
+            {
+                writerCalled = true;
+                stream.Write("new"u8);
+            },
+            FailCreatingTempFile));
+
+        if (accessDenied)
+        {
+            Assert.IsType<UnauthorizedAccessException>(error);
+        }
+        else
+        {
+            Assert.IsType<IOException>(error);
+        }
+
+        Assert.False(writerCalled);
+        Assert.Equal("existing subtitles", File.ReadAllText(path));
+        Assert.Equal(new[] { path }, Directory.GetFiles(_folder));
+    }
+
+    [Fact]
+    public void Write_WhenTempFileCreationFails_DoesNotCreateNewOutputFile()
+    {
+        var path = Path.Combine(_folder, "new-file.srt");
+
+        Assert.Throws<IOException>(() => AtomicFileWriter.Write(
+            path,
+            _ => throw new InvalidOperationException("Should not be called"),
+            _ => throw new IOException("Cannot create a temporary file.")));
+
+        Assert.False(File.Exists(path));
+        Assert.Empty(Directory.GetFiles(_folder));
+    }
+
+    [Fact]
+    public void Write_WhenTempCreationCollides_DoesNotDeleteThePreexistingTemp()
+    {
+        var target = Path.Combine(_folder, "subs.srt");
+        File.WriteAllText(target, "old content");
+        string? occupiedTemp = null;
+
+        FileStream SimulateCollision(string temp)
+        {
+            occupiedTemp = temp;
+            // Simulate a different process creating the chosen file before CreateNew.
+            File.WriteAllText(temp, "someone else's temporary content");
+            throw new IOException("CreateNew failed: file already exists.");
+        }
+
+        Assert.Throws<IOException>(() => AtomicFileWriter.Write(
+            target, _ => throw new InvalidOperationException("Should not write"),
+            SimulateCollision));
+
+        Assert.NotNull(occupiedTemp);
+        Assert.Equal("old content", File.ReadAllText(target));
+        Assert.Equal("someone else's temporary content", File.ReadAllText(occupiedTemp));
+    }
+
     [Fact]
     public void WriteAllText_ReplacesContentAndWritesPreamble()
     {
