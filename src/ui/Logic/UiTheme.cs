@@ -26,6 +26,7 @@ public static class UiTheme
     private static IStyle? _themeOverrideStyle;
     private static IStyle? _layoutScaleMenuStyle;
     private static ResourceDictionary? _resourceOverrides;
+    private static ResourceDictionary? _popupAndScrollResources;
     private static object? _themeChangeSubscription;
 
     /// <summary>
@@ -43,6 +44,8 @@ public static class UiTheme
     public const string ThemeNameNord = "Nord";
     public const string ThemeNameMidnightCinema = "MidnightCinema";
     public const string ThemeNameSakura = "Sakura";
+    public const string ThemeNameCatppuccinMocha = "CatppuccinMocha";
+    public const string ThemeNameDracula = "Dracula";
 
     /// <summary>
     /// The themes the "Cycle theme" shortcut steps through, in the Settings order. System is left
@@ -51,7 +54,7 @@ public static class UiTheme
     public static readonly string[] CycleThemeNames =
     [
         ThemeNameLight, ThemeNameDark, ThemeNameClassic, ThemeNamePastel, ThemeNameNord,
-        ThemeNameMidnightCinema, ThemeNameSakura,
+        ThemeNameMidnightCinema, ThemeNameSakura, ThemeNameCatppuccinMocha, ThemeNameDracula,
     ];
 
     /// <summary>The theme after <paramref name="currentTheme"/> in <see cref="CycleThemeNames"/>.</summary>
@@ -109,7 +112,8 @@ public static class UiTheme
     public static bool IsDarkThemeEnabled()
     {
         var themeName = ThemeName;
-        return themeName == ThemeNameDark || themeName == ThemeNameNord || themeName == ThemeNameMidnightCinema;
+        return themeName is ThemeNameDark or ThemeNameNord or ThemeNameMidnightCinema
+            or ThemeNameCatppuccinMocha or ThemeNameDracula;
     }
 
     /// <summary>
@@ -124,7 +128,10 @@ public static class UiTheme
         get
         {
             var themeName = ThemeName;
-            var folder = Path.Combine(Se.ThemesFolder, themeName);
+            // Both palettes are colour-only themes; reuse the existing Dark icon/art set.
+            var artTheme = themeName is ThemeNameCatppuccinMocha or ThemeNameDracula
+                ? ThemeNameDark : themeName;
+            var folder = Path.Combine(Se.ThemesFolder, artTheme);
             if (!ThemeIcon.Exists(folder, "Open"))
             {
                 // A theme (or a theme's icons, as with Pastel's and Nord's once art-only folders)
@@ -195,6 +202,12 @@ public static class UiTheme
             ApplyLighterDark();
             ApplyMidnightCinemaAccent();
         }
+        else if (themeSetting is ThemeNameCatppuccinMocha or ThemeNameDracula)
+        {
+            Application.Current!.RequestedThemeVariant = ThemeVariant.Dark;
+            ApplyLighterDark();
+            ApplyAdditionalDarkThemeAccent();
+        }
         else if (themeSetting == ThemeNameClassic)
         {
             Application.Current!.RequestedThemeVariant = ThemeVariant.Light;
@@ -219,6 +232,7 @@ public static class UiTheme
         EditorChrome.InvalidatePalette();
 
         ApplyFieldStyle();
+        ApplyPopupAndScrollColors();
         ApplyMenuScaleStyle(Se.Settings.Appearance.LayoutScale);
         ApplyTextSelectionStyle();
         ApplyProgressBarContrastStyle();
@@ -249,6 +263,7 @@ public static class UiTheme
 
         EditorChrome.InvalidatePalette();
         ApplyFieldStyle();
+        ApplyPopupAndScrollColors();
         ApplyTextSelectionStyle();
         ApplyProgressBarContrastStyle();
         SystemThemeChangedCallback?.Invoke();
@@ -760,6 +775,78 @@ public static class UiTheme
         }
 
         Application.Current.Styles.Add(_fieldStyle);
+    }
+
+    /// <summary>
+    /// Fluent has separate resources for the open ComboBox popup and for scrollbar tracks,
+    /// thumbs and arrows. Styling the closed ComboBox or ScrollViewer does not change them.
+    /// Use the same editor palette as the rest of the UI and refresh when the theme changes,
+    /// including System's light/dark transition.
+    /// </summary>
+    internal static void ApplyPopupAndScrollColors()
+    {
+        var app = Application.Current;
+        if (app == null)
+        {
+            return;
+        }
+
+        if (_popupAndScrollResources != null)
+        {
+            app.Resources.MergedDictionaries.Remove(_popupAndScrollResources);
+        }
+
+        var palette = EditorChrome.Palette;
+        var isDark = IsDarkThemeEnabled();
+        var popup = palette.Menu;
+        var hover = Blend(popup, palette.Accent, isDark ? 0.16 : 0.08);
+        var selected = Blend(popup, palette.Accent, isDark ? 0.38 : 0.18);
+        var selectedHover = Blend(popup, palette.Accent, isDark ? 0.48 : 0.25);
+        var thumb = Blend(palette.Panel, palette.StrongText, isDark ? 0.37 : 0.36);
+        var thumbHover = Blend(palette.Panel, palette.StrongText, isDark ? 0.55 : 0.53);
+        var thumbPressed = Blend(palette.Panel, palette.StrongText, isDark ? 0.67 : 0.65);
+
+        static SolidColorBrush Brush(Color color) => new(color);
+
+        _popupAndScrollResources = new ResourceDictionary
+        {
+            // The popup's Border uses dynamic resources, not ComboBox.Background.
+            ["ComboBoxDropDownBackground"] = Brush(popup),
+            ["ComboBoxDropDownBorderBrush"] = Brush(palette.MenuBorder),
+            ["ComboBoxItemBackground"] = Brush(popup),
+            ["ComboBoxItemForeground"] = Brush(palette.StrongText),
+            ["ComboBoxItemBackgroundPointerOver"] = Brush(hover),
+            ["ComboBoxItemForegroundPointerOver"] = Brush(palette.StrongText),
+            ["ComboBoxItemBackgroundPressed"] = Brush(selectedHover),
+            ["ComboBoxItemBackgroundSelected"] = Brush(selected),
+            ["ComboBoxItemForegroundSelected"] = Brush(palette.StrongText),
+            ["ComboBoxItemBackgroundSelectedPointerOver"] = Brush(selectedHover),
+            ["ComboBoxItemForegroundSelectedPointerOver"] = Brush(palette.StrongText),
+            ["ComboBoxItemBackgroundSelectedPressed"] = Brush(selectedHover),
+
+            // Fluent has distinct resources for the compact and expanded scrollbar.
+            // Leave the outer scrollbar transparent for macOS overlay/auto-hide behavior;
+            // the actual track is themed below.
+            ["ScrollBarBackground"] = Brushes.Transparent,
+            ["ScrollBarBackgroundPointerOver"] = Brushes.Transparent,
+            ["ScrollBarTrackFill"] = Brush(palette.Panel),
+            ["ScrollBarTrackFillPointerOver"] = Brush(palette.Hover),
+            ["ScrollBarTrackStroke"] = Brush(palette.Separator),
+            ["ScrollBarTrackStrokePointerOver"] = Brush(palette.Separator),
+            ["ScrollBarPanningThumbBackground"] = Brush(thumb),
+            ["ScrollBarThumbBackgroundColor"] = Brush(thumb),
+            ["ScrollBarThumbFillPointerOver"] = Brush(thumbHover),
+            ["ScrollBarThumbFillPressed"] = Brush(thumbPressed),
+            ["ScrollBarButtonBackground"] = Brush(palette.Panel),
+            ["ScrollBarButtonBackgroundPointerOver"] = Brush(palette.Hover),
+            ["ScrollBarButtonBackgroundPressed"] = Brush(palette.Pressed),
+            ["ScrollBarButtonBorderBrush"] = Brush(palette.Separator),
+            ["ScrollBarButtonBorderBrushPointerOver"] = Brush(palette.Separator),
+            ["ScrollBarButtonArrowForeground"] = Brush(palette.Icon),
+            ["ScrollBarButtonArrowForegroundPointerOver"] = Brush(palette.StrongText),
+        };
+
+        app.Resources.MergedDictionaries.Add(_popupAndScrollResources);
     }
 
     /// <summary>
@@ -1296,6 +1383,64 @@ public static class UiTheme
         });
     }
 
+    /// <summary>
+    /// Catppuccin Mocha and Dracula use their published dark palettes with Fluent's
+    /// standard dark control templates. The resource/style override is shared with
+    /// ApplyLighterDark, so switching themes removes all custom colours at once.
+    /// </summary>
+    private static void ApplyAdditionalDarkThemeAccent()
+    {
+        if (_resourceOverrides == null || _themeOverrideStyle is not Styles styles)
+        {
+            return;
+        }
+
+        var mocha = Se.Settings.Appearance.Theme == ThemeNameCatppuccinMocha;
+        var accent = mocha ? CatppuccinMochaAccentColor : DraculaAccentColor;
+        var button = mocha ? Color.FromRgb(0x31, 0x32, 0x44) : Color.FromRgb(0x44, 0x47, 0x5A);
+        var buttonHover = mocha ? Color.FromRgb(0x45, 0x47, 0x5A) : Color.FromRgb(0x62, 0x72, 0xA4);
+        var buttonPressed = mocha ? Color.FromRgb(0x58, 0x5B, 0x70) : Color.FromRgb(0x50, 0x55, 0x70);
+        var border = mocha ? Color.FromRgb(0x58, 0x5B, 0x70) : Color.FromRgb(0x62, 0x72, 0xA4);
+        var header = mocha ? Color.FromRgb(0x18, 0x18, 0x25) : Color.FromRgb(0x21, 0x22, 0x2C);
+
+        _resourceOverrides["SystemAccentColor"] = accent;
+        _resourceOverrides["SystemAccentColorLight1"] = mocha ? Color.FromRgb(0xD5, 0xB5, 0xF9) : Color.FromRgb(0xCB, 0xA7, 0xFA);
+        _resourceOverrides["SystemAccentColorLight2"] = mocha ? Color.FromRgb(0xE0, 0xC8, 0xFA) : Color.FromRgb(0xDB, 0xBF, 0xFC);
+        _resourceOverrides["SystemAccentColorLight3"] = mocha ? Color.FromRgb(0xF5, 0xC2, 0xE7) : Color.FromRgb(0xE9, 0xD7, 0xFD);
+        _resourceOverrides["SystemAccentColorDark1"] = mocha ? Color.FromRgb(0xB4, 0x8C, 0xDA) : Color.FromRgb(0xA2, 0x7A, 0xD7);
+        _resourceOverrides["SystemAccentColorDark2"] = mocha ? Color.FromRgb(0x9F, 0x75, 0xC6) : Color.FromRgb(0x8B, 0x63, 0xBF);
+        _resourceOverrides["SystemAccentColorDark3"] = mocha ? Color.FromRgb(0x88, 0x61, 0xAE) : Color.FromRgb(0x75, 0x50, 0xA8);
+
+        _resourceOverrides["ButtonBackground"] = new SolidColorBrush(button);
+        _resourceOverrides["ButtonBackgroundPointerOver"] = new SolidColorBrush(buttonHover);
+        _resourceOverrides["ButtonBackgroundPressed"] = new SolidColorBrush(buttonPressed);
+        _resourceOverrides["ButtonBorderBrushPointerOver"] = new SolidColorBrush(accent);
+        _resourceOverrides["ToggleButtonBackground"] = new SolidColorBrush(button);
+        _resourceOverrides["ToggleButtonBackgroundPointerOver"] = new SolidColorBrush(buttonHover);
+        _resourceOverrides["ToggleButtonBackgroundPressed"] = new SolidColorBrush(buttonPressed);
+
+        styles.Add(new Style(x => x.OfType<TableViewColumnHeader>())
+        {
+            Setters = { new Setter(TableViewColumnHeader.BackgroundProperty, new SolidColorBrush(header)) }
+        });
+        styles.Add(new Style(x => x.OfType<ContextMenu>())
+        {
+            Setters =
+            {
+                new Setter(TemplatedControl.BackgroundProperty, new SolidColorBrush(header)),
+                new Setter(TemplatedControl.BorderBrushProperty, new SolidColorBrush(border)),
+            }
+        });
+        styles.Add(new Style(x => x.OfType<FlyoutPresenter>())
+        {
+            Setters =
+            {
+                new Setter(TemplatedControl.BackgroundProperty, new SolidColorBrush(header)),
+                new Setter(TemplatedControl.BorderBrushProperty, new SolidColorBrush(border)),
+            }
+        });
+    }
+
     private static void ApplyWindowsClassicGray()
     {
         if (Application.Current == null)
@@ -1788,6 +1933,16 @@ public static class UiTheme
             return MidnightCinemaBackgroundColor;
         }
 
+        if (theme == ThemeNameCatppuccinMocha)
+        {
+            return CatppuccinMochaBackgroundColor;
+        }
+
+        if (theme == ThemeNameDracula)
+        {
+            return DraculaBackgroundColor;
+        }
+
         return Se.Settings.Appearance.DarkModeBackgroundColor.FromHexToColor();
     }
 
@@ -1847,6 +2002,12 @@ public static class UiTheme
     internal static readonly Color SakuraForegroundColor = Color.FromRgb(0x3A, 0x2A, 0x31);
     internal static readonly Color SakuraAccentColor = Color.FromRgb(0xD9, 0x46, 0x6F);
     private static readonly Color SakuraAlternatingRowColor = Color.FromRgb(0xFD, 0xEF, 0xF3);
+    internal static readonly Color CatppuccinMochaBackgroundColor = Color.FromRgb(0x1E, 0x1E, 0x2E);
+    internal static readonly Color CatppuccinMochaForegroundColor = Color.FromRgb(0xCD, 0xD6, 0xF4);
+    internal static readonly Color CatppuccinMochaAccentColor = Color.FromRgb(0xCB, 0xA6, 0xF7);
+    internal static readonly Color DraculaBackgroundColor = Color.FromRgb(0x28, 0x2A, 0x36);
+    internal static readonly Color DraculaForegroundColor = Color.FromRgb(0xF8, 0xF8, 0xF2);
+    internal static readonly Color DraculaAccentColor = Color.FromRgb(0xBD, 0x93, 0xF9);
 
     /// <summary>
     /// The subtitle grid's alternating row color. The fixed-palette themes have their own - the
@@ -1867,9 +2028,13 @@ public static class UiTheme
             return NordAlternatingRowColor.FromColorToHex();
         }
 
-        return theme == ThemeNameMidnightCinema
-            ? MidnightCinemaAlternatingRowColor.FromColorToHex()
-            : Se.Settings.Appearance.GridAlternatingRowColorDark;
+        return theme switch
+        {
+            ThemeNameMidnightCinema => MidnightCinemaAlternatingRowColor.FromColorToHex(),
+            ThemeNameCatppuccinMocha => Color.FromRgb(0x18, 0x18, 0x25).FromColorToHex(),
+            ThemeNameDracula => Color.FromRgb(0x21, 0x22, 0x2C).FromColorToHex(),
+            _ => Se.Settings.Appearance.GridAlternatingRowColorDark,
+        };
     }
 
     private static readonly WaveformColors MidnightCinemaWaveformColors = new(
@@ -1928,6 +2093,34 @@ public static class UiTheme
         ParagraphBackground: Color.FromArgb(70, 200, 185, 240),
         ParagraphSelectedBackground: Color.FromArgb(110, 180, 160, 240));
 
+    private static readonly WaveformColors CatppuccinMochaWaveformColors = new(
+        TextHex: CatppuccinMochaForegroundColor.FromColorToHex(),
+        Waveform: Color.FromRgb(0x89, 0xB4, 0xFA),
+        Background: Color.FromRgb(0x18, 0x18, 0x25),
+        Selected: Color.FromArgb(100, 0xCB, 0xA6, 0xF7),
+        Cursor: Color.FromRgb(0xF9, 0xE2, 0xAF),
+        ShotChange: Color.FromArgb(190, 0xCD, 0xD6, 0xF4),
+        Grid: Color.FromArgb(50, 0x89, 0xB4, 0xFA),
+        ParagraphLeft: Color.FromArgb(130, 0xA6, 0xE3, 0xA1),
+        ParagraphRight: Color.FromArgb(130, 0xF3, 0x8B, 0xA8),
+        FancyHigh: CatppuccinMochaAccentColor,
+        ParagraphBackground: Color.FromArgb(125, 0x31, 0x32, 0x44),
+        ParagraphSelectedBackground: Color.FromArgb(150, 0x45, 0x47, 0x5A));
+
+    private static readonly WaveformColors DraculaWaveformColors = new(
+        TextHex: DraculaForegroundColor.FromColorToHex(),
+        Waveform: Color.FromRgb(0x8B, 0xE9, 0xFD),
+        Background: Color.FromRgb(0x21, 0x22, 0x2C),
+        Selected: Color.FromArgb(100, 0xBD, 0x93, 0xF9),
+        Cursor: Color.FromRgb(0xF1, 0xFA, 0x8C),
+        ShotChange: Color.FromArgb(190, 0xF8, 0xF8, 0xF2),
+        Grid: Color.FromArgb(50, 0x8B, 0xE9, 0xFD),
+        ParagraphLeft: Color.FromArgb(130, 0x50, 0xFA, 0x7B),
+        ParagraphRight: Color.FromArgb(130, 0xFF, 0x55, 0x55),
+        FancyHigh: DraculaAccentColor,
+        ParagraphBackground: Color.FromArgb(125, 0x44, 0x47, 0x5A),
+        ParagraphSelectedBackground: Color.FromArgb(150, 0x62, 0x72, 0xA4));
+
     /// <summary>
     /// The waveform colors of a theme with a palette of its own, or null to use the settings.
     /// </summary>
@@ -1939,6 +2132,8 @@ public static class UiTheme
             ThemeNameSakura => SakuraWaveformColors,
             ThemeNameNord => NordWaveformColors,
             ThemeNamePastel => PastelWaveformColors,
+            ThemeNameCatppuccinMocha => CatppuccinMochaWaveformColors,
+            ThemeNameDracula => DraculaWaveformColors,
             _ => null,
         };
     }
@@ -1951,7 +2146,9 @@ public static class UiTheme
     /// </summary>
     internal static string GetThemeArtPath(string fileName)
     {
-        return Path.Combine(Se.ThemesFolder, ThemeName, fileName);
+        var theme = ThemeName is ThemeNameCatppuccinMocha or ThemeNameDracula
+            ? ThemeNameDark : ThemeName;
+        return Path.Combine(Se.ThemesFolder, theme, fileName);
     }
 
     /// <summary>
@@ -2010,6 +2207,16 @@ public static class UiTheme
         if (theme == ThemeNameMidnightCinema)
         {
             return MidnightCinemaForegroundColor;
+        }
+
+        if (theme == ThemeNameCatppuccinMocha)
+        {
+            return CatppuccinMochaForegroundColor;
+        }
+
+        if (theme == ThemeNameDracula)
+        {
+            return DraculaForegroundColor;
         }
 
         return Se.Settings.Appearance.DarkModeForegroundColor.FromHexToColor();
