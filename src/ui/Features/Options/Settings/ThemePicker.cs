@@ -33,6 +33,7 @@ internal static class ThemePicker
             UiTheme.ThemeNameSystem, UiTheme.ThemeNameLight, UiTheme.ThemeNameDark,
             UiTheme.ThemeNameClassic, UiTheme.ThemeNamePastel, UiTheme.ThemeNameNord,
             UiTheme.ThemeNameMidnightCinema, UiTheme.ThemeNameSakura,
+            UiTheme.ThemeNameCatppuccinMocha, UiTheme.ThemeNameDracula,
         ];
 
         for (var i = 0; i < vm.Themes.Count && i < themeNames.Length; i++)
@@ -231,6 +232,10 @@ internal static class ThemePicker
                 return new Palette(UiTheme.MidnightCinemaBackgroundColor, UiTheme.MidnightCinemaHeaderColor, UiTheme.MidnightCinemaForegroundColor, Color.FromRgb(0x2A, 0x26, 0x31), UiTheme.MidnightCinemaAccentColor);
             case UiTheme.ThemeNameSakura:
                 return new Palette(UiTheme.SakuraBackgroundColor, Color.FromRgb(248, 228, 235), UiTheme.SakuraForegroundColor, Color.FromRgb(250, 226, 234), UiTheme.SakuraAccentColor);
+            case UiTheme.ThemeNameCatppuccinMocha:
+                return new Palette(UiTheme.CatppuccinMochaBackgroundColor, Color.FromRgb(0x18, 0x18, 0x25), UiTheme.CatppuccinMochaForegroundColor, Color.FromRgb(0x31, 0x32, 0x44), UiTheme.CatppuccinMochaAccentColor);
+            case UiTheme.ThemeNameDracula:
+                return new Palette(UiTheme.DraculaBackgroundColor, Color.FromRgb(0x21, 0x22, 0x2C), UiTheme.DraculaForegroundColor, Color.FromRgb(0x44, 0x47, 0x5A), UiTheme.DraculaAccentColor);
             default:
                 return new Palette(Colors.White, Color.FromRgb(243, 243, 243), text, Color.FromRgb(240, 240, 240), EditorChrome.FallbackAccent);
         }
