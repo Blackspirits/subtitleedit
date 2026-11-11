@@ -5,7 +5,7 @@ namespace Nikse.SubtitleEdit.Logic.Plugins;
 
 /// <summary>
 /// Builds <see cref="PluginThemeColors"/> for the currently active Subtitle Edit theme.
-/// Dark colors come from <see cref="SeAppearance"/> (Nord and Midnight Cinema have their own); Classic/Pastel/Sakura/Light use the same
+/// Dark colors come from <see cref="SeAppearance"/> (the fixed dark palettes have their own); Classic/Pastel/Sakura/Light use the same
 /// hard-coded palettes as <see cref="UiTheme"/>.
 /// </summary>
 internal static class PluginThemeColorsFactory
@@ -50,7 +50,12 @@ internal static class PluginThemeColorsFactory
             IsDark = isDark,
             BackgroundColor = background.FromColorToHex(),
             ForegroundColor = foreground.FromColorToHex(),
-            AccentColor = appearance.FocusedButtonBackgroundColor,
+            AccentColor = themeName switch
+            {
+                UiTheme.ThemeNameCatppuccinMocha => UiTheme.CatppuccinMochaAccentColor.FromColorToHex(),
+                UiTheme.ThemeNameDracula => UiTheme.DraculaAccentColor.FromColorToHex(),
+                _ => appearance.FocusedButtonBackgroundColor,
+            },
             BackgroundColorLighter = UiUtil.LightenColor(background, 5).FromColorToHex(),
             BackgroundColorHeader = UiUtil.LightenColor(background, 15).FromColorToHex(),
             BookmarkColor = appearance.BookmarkColor,
